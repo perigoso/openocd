@@ -584,18 +584,9 @@ produced, PDF schematics are easily found and it is easy to make.
 @item @b{imx_gpio}
 @* A NXP i.MX-based board (e.g. Wandboard) using the GPIO pins (should work on any i.MX processor).
 
-@item @b{am335xgpio}
-@* A Texas Instruments AM335x-based board (e.g. BeagleBone Black) using the GPIO pins of the expansion headers.
-
 @item @b{jtag_vpi}
 @* A JTAG driver acting as a client for the JTAG VPI server interface.
 @* Link: @url{http://github.com/fjullien/jtag_vpi}
-
-@item @b{vdebug}
-@* A driver for Cadence virtual Debug Interface to emulated or simulated targets.
-It implements a client connecting to the vdebug server, which in turn communicates
-with the emulated or simulated RTL model through a transactor. The driver supports
-JTAG and DAP-level transports.
 
 @item @b{jtag_dpi}
 @* A JTAG driver acting as a client for the SystemVerilog Direct Programming
@@ -612,9 +603,6 @@ emulation model of target hardware.
 @item @b{sysfsgpio}
 @* A bitbang JTAG driver using Linux legacy sysfs GPIO.
 This is deprecated from Linux v5.3; prefer using @b{linuxgpiod}.
-
-@item @b{esp_usb_jtag}
-@* A JTAG driver to communicate with builtin debug modules of Espressif ESP32-C3 and ESP32-S3 chips using OpenOCD.
 
 @end itemize
 
@@ -2021,9 +2009,9 @@ proc setc15 @{regs value@} @{
 
     echo [format "set p15 0x%04x, 0x%08x" $regs $value]
 
-    arm mcr 15 [expr @{($regs >> 12) & 0x7@}] \
-        [expr @{($regs >> 0) & 0xf@}] [expr @{($regs >> 4) & 0xf@}] \
-        [expr @{($regs >> 8) & 0x7@}] $value
+    arm mcr 15 [expr ($regs>>12)&0x7] \
+        [expr ($regs>>0)&0xf] [expr ($regs>>4)&0xf] \
+        [expr ($regs>>8)&0x7] $value
 @}
 @end example
 
@@ -2126,15 +2114,6 @@ corresponding subsystems:
 @deffnx {Config Command} {pld init}
 @deffnx {Command} {tpiu init}
 @end deffn
-
-At last, @command{init} executes all the commands that are specified in
-the TCL list @var{post_init_commands}. The commands are executed in the
-same order they occupy in the list. If one of the commands fails, then
-the error is propagated and OpenOCD fails too.
-@example
-lappend post_init_commands @{echo "OpenOCD successfully initialized."@}
-lappend post_init_commands @{echo "Have fun with OpenOCD !"@}
-@end example
 @end deffn
 
 @deffn {Config Command} {noinit}
@@ -3178,9 +3157,7 @@ the target's supply voltage.
 The result can be converted to Volts (ignoring the most significant bytes, always zero)
 @example
 > set a [st-link cmd 8 0xf7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-> set n [expr @{[lindex $a 4] + 256 * [lindex $a 5]@}]
-> set d [expr @{[lindex $a 0] + 256 * [lindex $a 1]@}]
-> echo [expr @{2 * 1.2 * $n / $d@}]
+> echo [expr 2*1.2*([lindex $a 4]+256*[lindex $a 5])/([lindex $a 0]+256*[lindex $a 1])]
 3.24891518738
 @end example
 @end deffn
@@ -3328,180 +3305,11 @@ pinout.
 @end deffn
 
 
-@deffn {Interface Driver} {am335xgpio} The AM335x SoC is present in BeagleBone
-Black and BeagleBone Green single-board computers which expose some of the GPIOs
-on the two expansion headers.
-
-For maximum performance the driver accesses memory-mapped GPIO peripheral
-registers directly. The memory mapping requires read and write permission to
-kernel memory; if /dev/gpiomem exists it will be used, otherwise /dev/mem will
-be used. The driver restores the GPIO state on exit.
-
-All four GPIO ports are available. GPIOs numbered 0 to 31 are mapped to GPIO port
-0, GPIO numbers 32 to 63 are mapped to GPIO port 1 and so on.
-
-See @file{interface/beaglebone-swd-native.cfg} for a sample configuration file.
-
-@deffn {Config Command} {am335xgpio jtag_nums} @var{tck} @var{tms} @var{tdi} @var{tdo}
-Set JTAG transport GPIO numbers for TCK, TMS, TDI, and TDO (in that order).
-Must be specified to enable JTAG transport. These pins can also be specified
-individually.
-@end deffn
-
-@deffn {Config Command} {am335xgpio tck_num} @var{tck}
-Set TCK GPIO number. Must be specified to enable JTAG transport. Can also be
-specified using the configuration command @command{am335xgpio jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio tms_num} @var{tms}
-Set TMS GPIO number. Must be specified to enable JTAG transport. Can also be
-specified using the configuration command @command{am335xgpio jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio tdo_num} @var{tdo}
-Set TDO GPIO number. Must be specified to enable JTAG transport. Can also be
-specified using the configuration command @command{am335xgpio jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio tdi_num} @var{tdi}
-Set TDI GPIO number. Must be specified to enable JTAG transport. Can also be
-specified using the configuration command @command{am335xgpio jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio swd_nums} @var{swclk} @var{swdio}
-Set SWD transport GPIO numbers for SWCLK and SWDIO (in that order). Must be
-specified to enable SWD transport. These pins can also be specified individually.
-@end deffn
-
-@deffn {Config Command} {am335xgpio swclk_num} @var{swclk}
-Set SWCLK GPIO number. Must be specified to enable SWD transport. Can also be
-specified using the configuration command @command{am335xgpio swd_nums}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio swdio_num} @var{swdio}
-Set SWDIO GPIO number. Must be specified to enable SWD transport. Can also be
-specified using the configuration command @command{am335xgpio swd_nums}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio swdio_dir_num} @var{swdio_dir}
-Set SWDIO direction control pin GPIO number. If specified, this pin can be used
-to control the direction of an external buffer on the SWDIO pin. The direction
-control state can be set with the command @command{am335xgpio
-swdio_dir_output_state}. If not specified this feature is disabled.
-@end deffn
-
-@deffn {Config Command} {am335xgpio swdio_dir_output_state} @var{output_state}
-Set the state required for an external SWDIO buffer to be an output. Valid
-values are @option{on} (default) and @option{off}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio srst_num} @var{srst}
-Set SRST GPIO number. Must be specified to enable SRST.
-@end deffn
-
-@deffn {Config Command} {am335xgpio trst_num} @var{trst}
-Set TRST GPIO number. Must be specified to enable TRST.
-@end deffn
-
-@deffn {Config Command} {am335xgpio led_num} @var{led}
-Set activity LED GPIO number. If not specified an activity LED is not enabled.
-@end deffn
-
-@deffn {Config Command} {am335xgpio led_on_state} @var{on_state}
-Set required logic level for the LED to be on. Valid values are @option{on}
-(default) and @option{off}.
-@end deffn
-
-@deffn {Config Command} {am335xgpio speed_coeffs} @var{speed_coeff} @var{speed_offset}
-Set SPEED_COEFF and SPEED_OFFSET for delay calculations. If unspecified
-speed_coeff defaults to 600000 and speed_offset defaults to 575.
-@end deffn
-
-@end deffn
-
-
 @deffn {Interface Driver} {linuxgpiod}
 Linux provides userspace access to GPIO through libgpiod since Linux kernel version v4.6.
-The driver emulates either JTAG or SWD transport through bitbanging.
+The driver emulates either JTAG and SWD transport through bitbanging.
 
 See @file{interface/dln-2-gpiod.cfg} for a sample config.
-
-@deffn {Config Command} {linuxgpiod gpiochip} @var{chip}
-Set the GPIO chip number for all GPIOs used by linuxgpiod. If GPIOs use
-different GPIO chips then the individual GPIO configuration commands (i.e., not
-@command{linuxgpiod jtag_nums} or @command{linuxgpiod swd_nums}) can be used to
-set chip numbers independently for each GPIO.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod jtag_nums} @var{tck} @var{tms} @var{tdi} @var{tdo}
-Set JTAG transport GPIO numbers for TCK, TMS, TDI, and TDO (in that order). Must
-be specified to enable JTAG transport. These pins can also be specified
-individually.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod tck_num} [@var{chip}] @var{tck}
-Set TCK GPIO number, and optionally TCK chip number. Must be specified to enable
-JTAG transport. Can also be specified using the configuration command
-@command{linuxgpiod jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod tms_num} [@var{chip}] @var{tms}
-Set TMS GPIO number, and optionally TMS chip number. Must be specified to enable
-JTAG transport. Can also be specified using the configuration command
-@command{linuxgpiod jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod tdo_num} [@var{chip}] @var{tdo}
-Set TDO GPIO number, and optionally TDO chip number. Must be specified to enable
-JTAG transport. Can also be specified using the configuration command
-@command{linuxgpiod jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod tdi_num} [@var{chip}] @var{tdi}
-Set TDI GPIO number, and optionally TDI chip number. Must be specified to enable
-JTAG transport. Can also be specified using the configuration command
-@command{linuxgpiod jtag_nums}.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod trst_num} [@var{chip}] @var{trst}
-Set TRST GPIO number, and optionally TRST chip number. Must be specified to
-enable TRST.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod swd_nums} @var{swclk} @var{swdio}
-Set SWD transport GPIO numbers for SWCLK and SWDIO (in that order). Must be
-specified to enable SWD transport. These pins can also be specified
-individually.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod swclk_num} [@var{chip}] @var{swclk}
-Set SWCLK GPIO number, and optionally SWCLK chip number. Must be specified to
-enable SWD transport. Can also be specified using the configuration command
-@command{linuxgpiod swd_nums}.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod swdio_num} [@var{chip}] @var{swdio}
-Set SWDIO GPIO number, and optionally SWDIO chip number. Must be specified to
-enable SWD transport. Can also be specified using the configuration command
-@command{linuxgpiod swd_nums}.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod swdio_dir_num} [@var{chip}] @var{swdio_dir}
-Set SWDIO direction control GPIO number, and optionally SWDIO direction control
-chip number. If specified, this GPIO can be used to control the direction of an
-external buffer connected to the SWDIO GPIO (set=output mode, clear=input mode).
-@end deffn
-
-@deffn {Config Command} {linuxgpiod srst_num} [@var{chip}] @var{srst}
-Set SRST GPIO number, and optionally SRST chip number. Must be specified to
-enable SRST.
-@end deffn
-
-@deffn {Config Command} {linuxgpiod led_num} [@var{chip}] @var{led}
-Set activity LED GPIO number, and optionally activity LED chip number. If not
-specified an activity LED is not enabled.
-@end deffn
-
 @end deffn
 
 
@@ -3534,41 +3342,6 @@ This value is only used with the standard variant.
 @end deffn
 @end deffn
 
-
-@deffn {Interface Driver} {vdebug}
-Cadence Virtual Debug Interface driver.
-
-@deffn {Config Command} {vdebug server} host:port
-Specifies the host and TCP port number where the vdebug server runs.
-@end deffn
-
-@deffn {Config Command} {vdebug batching} value
-Specifies the batching method for the vdebug request. Possible values are
-0 for no batching
-1 or wr to batch write transactions together (default)
-2 or rw to batch both read and write transactions
-@end deffn
-
-@deffn {Config Command} {vdebug polling} min max
-Takes two values, representing the polling interval in ms. Lower values mean faster
-debugger responsiveness, but lower emulation performance. The minimum should be
-around 10, maximum should not exceed 1000, which is the default gdb and keepalive
-timeout value.
-@end deffn
-
-@deffn {Config Command} {vdebug bfm_path} path clk_period
-Specifies the hierarchical path and input clk period of the vdebug BFM in the design.
-The hierarchical path uses Verilog notation top.inst.inst
-The clock period must include the unit, for instance 40ns.
-@end deffn
-
-@deffn {Config Command} {vdebug mem_path} path base size
-Specifies the hierarchical path to the design memory instance for backdoor access.
-Up to 4 memories can be specified. The hierarchical path uses Verilog notation.
-The base specifies start address in the design address space, size its size in bytes.
-Both values can use hexadecimal notation with prefix 0x.
-@end deffn
-@end deffn
 
 @deffn {Interface Driver} {jtag_dpi}
 SystemVerilog Direct Programming Interface (DPI) compatible driver for
@@ -3646,44 +3419,6 @@ buspirate led 1
 
 @end deffn
 
-@deffn {Interface Driver} {esp_usb_jtag}
-Espressif JTAG driver to communicate with ESP32-C3, ESP32-S3 chips and ESP USB Bridge board using OpenOCD.
-These chips have built-in JTAG circuitry and can be debugged without any additional hardware.
-Only an USB cable connected to the D+/D- pins is necessary.
-
-@deffn {Config Command} {espusbjtag tdo}
-Returns the current state of the TDO line
-@end deffn
-
-@deffn {Config Command} {espusbjtag setio} setio
-Manually set the status of the output lines with the order of (tdi tms tck trst srst)
-@example
-espusbjtag setio 0 1 0 1 0
-@end example
-@end deffn
-
-@deffn {Config Command} {espusbjtag vid_pid} vid_pid
-Set vendor ID and product ID for the ESP usb jtag driver
-@example
-espusbjtag vid_pid 0x303a 0x1001
-@end example
-@end deffn
-
-@deffn {Config Command} {espusbjtag caps_descriptor} caps_descriptor
-Set the jtag descriptor to read capabilities of ESP usb jtag driver
-@example
-espusbjtag caps_descriptor 0x2000
-@end example
-@end deffn
-
-@deffn {Config Command} {espusbjtag chip_id} chip_id
-Set chip id to transfer to the ESP USB bridge board
-@example
-espusbjtag chip_id 1
-@end example
-@end deffn
-
-@end deffn
 
 @section Transport Configuration
 @cindex Transport
@@ -4416,10 +4151,6 @@ option. When vendors put out multiple versions of a chip, or use the same
 JTAG-level ID for several largely-compatible chips, it may be more practical
 to ignore the version field than to update config files to handle all of
 the various chip IDs. The version field is defined as bit 28-31 of the IDCODE.
-@item @code{-ignore-bypass}
-@*Specify this to ignore the 'bypass' bit of the idcode. Some vendor put
-an invalid idcode regarding this bit. Specify this to ignore this bit and
-to not consider this tap in bypass mode.
 @item @code{-ircapture} @var{NUMBER}
 @*The bit pattern loaded by the TAP into the JTAG shift register
 on entry to the @sc{ircapture} state, such as 0x01.
@@ -4687,12 +4418,8 @@ There can only be one DAP for each JTAG tap in the system.
 A DAP may also provide optional @var{configparams}:
 
 @itemize @bullet
-@item @code{-adiv5}
-Specify that it's an ADIv5 DAP. This is the default if not specified.
-@item @code{-adiv6}
-Specify that it's an ADIv6 DAP.
 @item @code{-ignore-syspwrupack}
-Specify this to ignore the CSYSPWRUPACK bit in the ARM DAP DP CTRL/STAT
+@*Specify this to ignore the CSYSPWRUPACK bit in the ARM DAP DP CTRL/STAT
 register during initial examination and when checking the sticky error bit.
 This bit is normally checked after setting the CSYSPWRUPREQ bit, but some
 devices do not set the ack bit until sometime later.
@@ -4718,12 +4445,9 @@ This command returns a list of all registered DAP objects. It it useful mainly
 for TCL scripting.
 @end deffn
 
-@deffn {Command} {dap info} [@var{num}|@option{root}]
+@deffn {Command} {dap info} [num]
 Displays the ROM table for MEM-AP @var{num},
 defaulting to the currently selected AP of the currently selected target.
-On ADIv5 DAP @var{num} is the numeric index of the AP.
-On ADIv6 DAP @var{num} is the base address of the AP.
-With ADIv6 only, @option{root} specifies the root ROM table.
 @end deffn
 
 @deffn {Command} {dap init}
@@ -4734,33 +4458,24 @@ initialization, too.
 
 The following commands exist as subcommands of DAP instances:
 
-@deffn {Command} {$dap_name info} [@var{num}|@option{root}]
+@deffn {Command} {$dap_name info} [num]
 Displays the ROM table for MEM-AP @var{num},
 defaulting to the currently selected AP.
-On ADIv5 DAP @var{num} is the numeric index of the AP.
-On ADIv6 DAP @var{num} is the base address of the AP.
-With ADIv6 only, @option{root} specifies the root ROM table.
 @end deffn
 
 @deffn {Command} {$dap_name apid} [num]
 Displays ID register from AP @var{num}, defaulting to the currently selected AP.
-On ADIv5 DAP @var{num} is the numeric index of the AP.
-On ADIv6 DAP @var{num} is the base address of the AP.
 @end deffn
 
 @anchor{DAP subcommand apreg}
 @deffn {Command} {$dap_name apreg} ap_num reg [value]
 Displays content of a register @var{reg} from AP @var{ap_num}
 or set a new value @var{value}.
-On ADIv5 DAP @var{ap_num} is the numeric index of the AP.
-On ADIv6 DAP @var{ap_num} is the base address of the AP.
 @var{reg} is byte address of a word register, 0, 4, 8 ... 0xfc.
 @end deffn
 
 @deffn {Command} {$dap_name apsel} [num]
 Select AP @var{num}, defaulting to 0.
-On ADIv5 DAP @var{num} is the numeric index of the AP.
-On ADIv6 DAP @var{num} is the base address of the AP.
 @end deffn
 
 @deffn {Command} {$dap_name dpreg} reg [value]
@@ -4778,8 +4493,6 @@ background activity by OpenOCD while you are operating at such low-level.
 @deffn {Command} {$dap_name baseaddr} [num]
 Displays debug base address from MEM-AP @var{num},
 defaulting to the currently selected AP.
-On ADIv5 DAP @var{num} is the numeric index of the AP.
-On ADIv6 DAP @var{num} is the base address of the AP.
 @end deffn
 
 @deffn {Command} {$dap_name memaccess} [value]
@@ -4810,13 +4523,13 @@ where the mask bit is 1. The following example sets HPROT3 (cacheable)
 and leaves the rest of the pattern intact. It configures memory access through
 DCache on Cortex-M7.
 @example
-set CSW_HPROT3_CACHEABLE [expr @{1 << 27@}]
+set CSW_HPROT3_CACHEABLE [expr 1 << 27]
 samv.dap apcsw $CSW_HPROT3_CACHEABLE $CSW_HPROT3_CACHEABLE
 @end example
 
 Another example clears SPROT bit and leaves the rest of pattern intact:
 @example
-set CSW_SPROT [expr @{1 << 30@}]
+set CSW_SPROT [expr 1 << 30]
 samv.dap apcsw 0 $CSW_SPROT
 @end example
 
@@ -4836,10 +4549,6 @@ Set/get quirks mode for TI TMS450/TMS570 processors
 Disabled by default
 @end deffn
 
-@deffn {Config Command} {$dap_name nu_npcx_quirks} [@option{enable}]
-Set/get quirks mode for Nuvoton NPCX/NPCD MCU families
-Disabled by default
-@end deffn
 
 @node CPU Configuration
 @chapter CPU Configuration
@@ -4958,9 +4667,6 @@ compact Thumb2 instruction set. Supports also ARMv6-M and ARMv8-M cores
 @item @code{dsp5680xx} -- implements Freescale's 5680x DSP.
 @item @code{esirisc} -- this is an EnSilica eSi-RISC core.
 The current implementation supports eSi-32xx cores.
-@item @code{esp32} -- this is an Espressif SoC with dual Xtensa cores.
-@item @code{esp32s2} -- this is an Espressif SoC with single Xtensa core.
-@item @code{esp32s3} -- this is an Espressif SoC with dual Xtensa cores.
 @item @code{fa526} -- resembles arm920 (w/o Thumb).
 @item @code{feroceon} -- resembles arm926.
 @item @code{hla_target} -- a Cortex-M alternative to work with HL adapters like ST-Link.
@@ -4975,9 +4681,9 @@ specified, @xref{gdbportoverride,,option -gdb-port}.), and a fake ARM core will
 be emulated to comply to GDB remote protocol.
 @item @code{mips_m4k} -- a MIPS core.
 @item @code{mips_mips64} -- a MIPS64 core.
-@item @code{nds32_v2} -- this is an Andes NDS32 v2 core (deprecated; would be removed in v0.13.0).
-@item @code{nds32_v3} -- this is an Andes NDS32 v3 core (deprecated; would be removed in v0.13.0).
-@item @code{nds32_v3m} -- this is an Andes NDS32 v3m core (deprecated; would be removed in v0.13.0).
+@item @code{nds32_v2} -- this is an Andes NDS32 v2 core.
+@item @code{nds32_v3} -- this is an Andes NDS32 v3 core.
+@item @code{nds32_v3m} -- this is an Andes NDS32 v3m core.
 @item @code{or1k} -- this is an OpenRISC 1000 core.
 The current implementation supports three JTAG TAP cores:
 @itemize @minus
@@ -5159,9 +4865,8 @@ The value should normally correspond to a static mapping for the
 scan and after a reset. A manual call to arp_examine is required to
 access the target for debugging.
 
-@item @code{-ap-num} @var{ap_number} -- set DAP access port for target.
-On ADIv5 DAP @var{ap_number} is the numeric index of the DAP AP the target is connected to.
-On ADIv6 DAP @var{ap_number} is the base address of the DAP AP the target is connected to.
+@item @code{-ap-num} @var{ap_number} -- set DAP access port for target,
+@var{ap_number} is the numeric index of the DAP AP the target is connected to.
 Use this option with systems where multiple, independent cores are connected
 to separate access ports of the same DAP.
 
@@ -5228,76 +4933,27 @@ use these to deal with specific reset cases.
 They are not otherwise documented here.
 @end deffn
 
-@deffn {Command} {$target_name set_reg} dict
-Set register values of the target.
+@deffn {Command} {$target_name array2mem} arrayname width address count
+@deffnx {Command} {$target_name mem2array} arrayname width address count
+These provide an efficient script-oriented interface to memory.
+The @code{array2mem} primitive writes bytes, halfwords, words
+or double-words; while @code{mem2array} reads them.
+In both cases, the TCL side uses an array, and
+the target side uses raw memory.
+
+The efficiency comes from enabling the use of
+bulk JTAG data transfer operations.
+The script orientation comes from working with data
+values that are packaged for use by TCL scripts;
+@command{mdw} type primitives only print data they retrieve,
+and neither store nor return those values.
 
 @itemize
-@item @var{dict} ... Tcl dictionary with pairs of register names and values.
+@item @var{arrayname} ... is the name of an array variable
+@item @var{width} ... is 8/16/32/64 - indicating the memory access size
+@item @var{address} ... is the target memory address
+@item @var{count} ... is the number of elements to process
 @end itemize
-
-For example, the following command sets the value 0 to the program counter (pc)
-register and 0x1000 to the stack pointer (sp) register:
-
-@example
-set_reg @{pc 0 sp 0x1000@}
-@end example
-@end deffn
-
-@deffn {Command} {$target_name get_reg} [-force] list
-Get register values from the target and return them as Tcl dictionary with pairs
-of register names and values.
-If option "-force" is set, the register values are read directly from the
-target, bypassing any caching.
-
-@itemize
-@item @var{list} ... List of register names
-@end itemize
-
-For example, the following command retrieves the values from the program
-counter (pc) and stack pointer (sp) register:
-
-@example
-get_reg @{pc sp@}
-@end example
-@end deffn
-
-@deffn {Command} {$target_name write_memory} address width data ['phys']
-This function provides an efficient way to write to the target memory from a Tcl
-script.
-
-@itemize
-@item @var{address} ... target memory address
-@item @var{width} ... memory access bit size, can be 8, 16, 32 or 64
-@item @var{data} ... Tcl list with the elements to write
-@item ['phys'] ... treat the memory address as physical instead of virtual address
-@end itemize
-
-For example, the following command writes two 32 bit words into the target
-memory at address 0x20000000:
-
-@example
-write_memory 0x20000000 32 @{0xdeadbeef 0x00230500@}
-@end example
-@end deffn
-
-@deffn {Command} {$target_name read_memory} address width count ['phys']
-This function provides an efficient way to read the target memory from a Tcl
-script.
-A Tcl list containing the requested memory elements is returned by this function.
-
-@itemize
-@item @var{address} ... target memory address
-@item @var{width} ... memory access bit size, can be 8, 16, 32 or 64
-@item @var{count} ... number of elements to read
-@item ['phys'] ... treat the memory address as physical instead of virtual address
-@end itemize
-
-For example, the following command reads two 32 bit words from the target
-memory at address 0x20000000:
-
-@example
-read_memory 0x20000000 32 2
-@end example
 @end deffn
 
 @deffn {Command} {$target_name cget} queryparm
@@ -5367,8 +5023,8 @@ When the current target has an MMU which is present and active,
 Otherwise, or if the optional @var{phys} flag is specified,
 @var{addr} is interpreted as a physical address.
 If @var{count} is specified, displays that many units.
-(If you want to process the data instead of displaying it,
-see the @code{read_memory} primitives.)
+(If you want to manipulate the data instead of displaying it,
+see the @code{mem2array} primitives.)
 @end deffn
 
 @deffn {Command} {$target_name mwd} [phys] addr doubleword [count]
@@ -5523,22 +5179,6 @@ when reset disables PLLs needed to use a fast clock.
 @* After single-step has completed
 @item @b{trace-config}
 @* After target hardware trace configuration was changed
-@item @b{semihosting-user-cmd-0x100}
-@* The target made a semihosting call with user-defined operation number 0x100
-@item @b{semihosting-user-cmd-0x101}
-@* The target made a semihosting call with user-defined operation number 0x101
-@item @b{semihosting-user-cmd-0x102}
-@* The target made a semihosting call with user-defined operation number 0x102
-@item @b{semihosting-user-cmd-0x103}
-@* The target made a semihosting call with user-defined operation number 0x103
-@item @b{semihosting-user-cmd-0x104}
-@* The target made a semihosting call with user-defined operation number 0x104
-@item @b{semihosting-user-cmd-0x105}
-@* The target made a semihosting call with user-defined operation number 0x105
-@item @b{semihosting-user-cmd-0x106}
-@* The target made a semihosting call with user-defined operation number 0x106
-@item @b{semihosting-user-cmd-0x107}
-@* The target made a semihosting call with user-defined operation number 0x107
 @end itemize
 
 @quotation Note
@@ -6666,7 +6306,7 @@ The AVR 8-bit microcontrollers from Atmel integrate flash memory.
 @end deffn
 
 @deffn {Flash Driver} {bluenrg-x}
-STMicroelectronics BlueNRG-1, BlueNRG-2 and BlueNRG-LP/LPS Bluetooth low energy wireless system-on-chip. They include ARM Cortex-M0/M0+ core and internal flash memory.
+STMicroelectronics BlueNRG-1, BlueNRG-2 and BlueNRG-LP Bluetooth low energy wireless system-on-chip. They include ARM Cortex-M0/M0+ core and internal flash memory.
 The driver automatically recognizes these chips using
 the chip identification registers, and autoconfigures itself.
 
@@ -6711,22 +6351,13 @@ flash bank $_FLASHNAME cc3220sf 0 0 0 0 $_TARGETNAME
 @end deffn
 
 @deffn {Flash Driver} {efm32}
-All members of the EFM32/EFR32 microcontroller family from Energy Micro (now Silicon Labs)
-include internal flash and use Arm Cortex-M3 or Cortex-M4 cores. The driver automatically
-recognizes a number of these chips using the chip identification register, and
+All members of the EFM32 microcontroller family from Energy Micro include
+internal flash and use ARM Cortex-M3 cores. The driver automatically recognizes
+a number of these chips using the chip identification register, and
 autoconfigures itself.
 @example
 flash bank $_FLASHNAME efm32 0 0 0 0 $_TARGETNAME
 @end example
-It supports writing to the user data page, as well as the portion of the lockbits page
-past 512 bytes on chips with larger page sizes. The latter is used by the SiLabs
-bootloader/AppLoader system for encryption keys. Setting protection on these pages is
-currently not supported.
-@example
-flash bank userdata.flash efm32 0x0FE00000 0 0 0 $_TARGETNAME
-flash bank lockbits.flash efm32 0x0FE04000 0 0 0 $_TARGETNAME
-@end example
-
 A special feature of efm32 controllers is that it is possible to completely disable the
 debug interface by writing the correct values to the 'Debug Lock Word'. OpenOCD supports
 this via the following command:
@@ -7541,7 +7172,6 @@ applied to all of them.
 All members of the STM32F0, STM32F1 and STM32F3 microcontroller families
 from STMicroelectronics and all members of the GD32F1x0, GD32F3x0 and GD32E23x microcontroller
 families from GigaDevice include internal flash and use ARM Cortex-M0/M3/M4/M23 cores.
-The driver also works with GD32VF103 powered by RISC-V core.
 The driver automatically recognizes a number of these chips using
 the chip identification register, and autoconfigures itself.
 
@@ -8681,19 +8311,18 @@ Close the OpenOCD server, disconnecting all clients (GDB, telnet,
 other). If option @option{error} is used, OpenOCD will return a
 non-zero exit code to the parent process.
 
-If user types CTRL-C or kills OpenOCD, the command @command{shutdown}
-will be automatically executed to cause OpenOCD to exit.
-
-It is possible to specify, in the TCL list @var{pre_shutdown_commands} , a
-set of commands to be automatically executed before @command{shutdown} , e.g.:
+Like any TCL commands, also @command{shutdown} can be redefined, e.g.:
 @example
-lappend pre_shutdown_commands @{echo "Goodbye, my friend ..."@}
-lappend pre_shutdown_commands @{echo "see you soon !"@}
+# redefine shutdown
+rename shutdown original_shutdown
+proc shutdown @{@} @{
+    puts "This is my implementation of shutdown"
+    # my own stuff before exit OpenOCD
+    original_shutdown
+@}
 @end example
-The commands in the list will be executed (in the same order they occupy
-in the list) before OpenOCD exits. If one of the commands in the list
-fails, then the remaining commands are not executed anymore while OpenOCD
-will proceed to quit.
+If user types CTRL-C or kills OpenOCD, either the command @command{shutdown}
+or its replacement will be automatically executed before OpenOCD exits.
 @end deffn
 
 @anchor{debuglevel}
@@ -8787,78 +8416,6 @@ Debug and trace infrastructure:
 ...
 (164) ETM_contextid_comparator_mask (/32)
 >
-@end example
-@end deffn
-
-@deffn {Command} {set_reg} dict
-Set register values of the target.
-
-@itemize
-@item @var{dict} ... Tcl dictionary with pairs of register names and values.
-@end itemize
-
-For example, the following command sets the value 0 to the program counter (pc)
-register and 0x1000 to the stack pointer (sp) register:
-
-@example
-set_reg @{pc 0 sp 0x1000@}
-@end example
-@end deffn
-
-@deffn {Command} {get_reg} [-force] list
-Get register values from the target and return them as Tcl dictionary with pairs
-of register names and values.
-If option "-force" is set, the register values are read directly from the
-target, bypassing any caching.
-
-@itemize
-@item @var{list} ... List of register names
-@end itemize
-
-For example, the following command retrieves the values from the program
-counter (pc) and stack pointer (sp) register:
-
-@example
-get_reg @{pc sp@}
-@end example
-@end deffn
-
-@deffn {Command} {write_memory} address width data ['phys']
-This function provides an efficient way to write to the target memory from a Tcl
-script.
-
-@itemize
-@item @var{address} ... target memory address
-@item @var{width} ... memory access bit size, can be 8, 16, 32 or 64
-@item @var{data} ... Tcl list with the elements to write
-@item ['phys'] ... treat the memory address as physical instead of virtual address
-@end itemize
-
-For example, the following command writes two 32 bit words into the target
-memory at address 0x20000000:
-
-@example
-write_memory 0x20000000 32 @{0xdeadbeef 0x00230500@}
-@end example
-@end deffn
-
-@deffn {Command} {read_memory} address width count ['phys']
-This function provides an efficient way to read the target memory from a Tcl
-script.
-A Tcl list containing the requested memory elements is returned by this function.
-
-@itemize
-@item @var{address} ... target memory address
-@item @var{width} ... memory access bit size, can be 8, 16, 32 or 64
-@item @var{count} ... number of elements to read
-@item ['phys'] ... treat the memory address as physical instead of virtual address
-@end itemize
-
-For example, the following command reads two 32 bit words from the target
-memory at address 0x20000000:
-
-@example
-read_memory 0x20000000 32 2
 @end example
 @end deffn
 
@@ -8999,8 +8556,8 @@ When the current target has an MMU which is present and active,
 Otherwise, or if the optional @var{phys} flag is specified,
 @var{addr} is interpreted as a physical address.
 If @var{count} is specified, displays that many units.
-(If you want to process the data instead of displaying it,
-see the @code{read_memory} primitives.)
+(If you want to manipulate the data instead of displaying it,
+see the @code{mem2array} primitives.)
 @end deffn
 
 @deffn {Command} {mwd} [phys] addr doubleword [count]
@@ -9054,7 +8611,7 @@ In addition the following arguments may be specified:
 proc load_image_bin @{fname foffset address length @} @{
     # Load data from fname filename at foffset offset to
     # target at address. Load at most length bytes.
-    load_image $fname [expr @{$address - $foffset@}] bin \
+    load_image $fname [expr $address - $foffset] bin \
                $address $length
 @}
 @end example
@@ -9511,10 +9068,7 @@ the @emph{cti} group of commands.
 
 @deffn {Command} {cti create} cti_name @option{-dap} dap_name @option{-ap-num} apn @option{-baseaddr} base_address
 Creates a CTI instance @var{cti_name} on the DAP instance @var{dap_name} on MEM-AP
-@var{apn}.
-On ADIv5 DAP @var{apn} is the numeric index of the DAP AP the CTI is connected to.
-On ADIv6 DAP @var{apn} is the base address of the DAP AP the CTI is connected to.
-The @var{base_address} must match the base address of the CTI
+@var{apn}. The @var{base_address} must match the base address of the CTI
 on the respective MEM-AP. All arguments are mandatory. This creates a
 new command @command{$cti_name} which is used for various purposes
 including additional configuration.
@@ -9623,17 +9177,6 @@ requests by using a special SVC instruction that is trapped at the
 Supervisor Call vector by OpenOCD.
 @end deffn
 
-@deffn {Command} {arm semihosting_redirect} (@option{disable} | @option{tcp} <port>
-[@option{debug}|@option{stdio}|@option{all})
-@cindex ARM semihosting
-Redirect semihosting messages to a specified TCP port.
-
-This command redirects debug (READC, WRITEC and WRITE0) and stdio (READ, WRITE)
-semihosting operations to the specified TCP port.
-The command allows to select which type of operations to redirect (debug, stdio, all (default)).
-Note: for stdio operations, only I/O from/to ':tt' file descriptors are redirected.
-@end deffn
-
 @deffn {Command} {arm semihosting_cmdline} [@option{enable}|@option{disable}]
 @cindex ARM semihosting
 Set the command line to be passed to the debugger.
@@ -9681,23 +9224,6 @@ request or equivalent").
 
 To make the SEMIHOSTING_SYS_EXIT call return normally, enable
 this option (default: disabled).
-@end deffn
-
-@deffn {Command} {arm semihosting_read_user_param}
-@cindex ARM semihosting
-Read parameter of the semihosting call from the target. Usable in
-semihosting-user-cmd-0x10* event handlers, returning a string.
-
-When the target makes semihosting call with operation number from range 0x100-
-0x107, an optional string parameter can be passed to the server. This parameter
-is valid during the run of the event handlers and is accessible with this
-command.
-@end deffn
-
-@deffn {Command} {arm semihosting_basedir} [dir]
-@cindex ARM semihosting
-Set the base directory for semihosting I/O, either an absolute path or a path relative to OpenOCD working directory.
-Use "." for the current directory.
 @end deffn
 
 @section ARMv4 and ARMv5 Architecture
@@ -10179,9 +9705,8 @@ using the @command{$tpiu_name cget} command.
 @item @code{-dap} @var{dap_name} -- names the DAP used to access this
 TPIU. @xref{dapdeclaration,,DAP declaration}, on how to create and manage DAP instances.
 
-@item @code{-ap-num} @var{ap_number} -- sets DAP access port for TPIU.
-On ADIv5 DAP @var{ap_number} is the numeric index of the DAP AP the TPIU is connected to.
-On ADIv6 DAP @var{ap_number} is the base address of the DAP AP the TPIU is connected to.
+@item @code{-ap-num} @var{ap_number} -- sets DAP access port for TPIU,
+@var{ap_number} is the numeric index of the DAP AP the TPIU is connected to.
 
 @item @code{-baseaddr} @var{base_address} -- sets the TPIU @var{base_address} where
 to access the TPIU in the DAP AP memory space.
@@ -10726,6 +10251,13 @@ follows:
 
 @subsection RISC-V Debug Configuration Commands
 
+@deffn {Command} {riscv dump_sample_buf} [base64]
+Dump and clear the contents of the sample buffer. Which samples are collected
+is configured with @code{riscv memory_sample}. If the optional base64
+argument is passed, the raw buffer is dumped in base64 format, so that
+external tools can gather the data efficiently.
+@end deffn
+
 @deffn {Config Command} {riscv expose_csrs} n[-m|=name] [...]
 Configure which CSRs to expose in addition to the standard ones. The CSRs to expose
 can be specified as individual register numbers or register ranges (inclusive). For the
@@ -10772,6 +10304,22 @@ $_TARGETNAME expose_custom 16-24
 # user-defined name "custom_myregister":
 $_TARGETNAME expose_custom 32=myregister
 @end example
+@end deffn
+
+@deffn {Command} {riscv memory_sample} bucket address|clear [size=4]
+Configure OpenOCD to frequently read size bytes at the given addresses.
+Execute the command with no arguments to see the current configuration. Use
+clear to stop using a given bucket.
+
+OpenOCD will allocate a 1MB sample buffer, and when it fills up no more
+samples will be collected until it is emptied with @code{riscv
+dump_sample_buf}.
+@end deffn
+
+@deffn {Command} {riscv repeat_read} count address [size=4]
+Quickly read count words of the given size from address. This can be useful
+to read out a buffer that's memory-mapped to be accessed through a single
+address, or to sample a changing value in a memory-mapped device.
 @end deffn
 
 @deffn {Command} {riscv set_command_timeout_sec} [seconds]
@@ -10842,8 +10390,23 @@ and DBUS registers, respectively.
 @end deffn
 
 @deffn {Command} {riscv use_bscan_tunnel} value
-Enable or disable use of a BSCAN tunnel to reach DM.  Supply the width of
-the DM transport TAP's instruction register to enable.  Supply a value of 0 to disable.
+Enable or disable use of a BSCAN tunnel to reach the Debug Module. Supply the
+width of the DM transport TAP's instruction register to enable. Supply a
+value of 0 to disable.
+
+This BSCAN tunnel interface is specific to SiFive IP. Anybody may implement
+it, but currently there is no good documentation on it. In a nutshell, this
+feature scans USER4 into a Xilinx TAP to select the tunnel device (assuming
+hardware is present and it is hooked up to the Xilinx USER4 IR) and
+encapsulates a tunneled scan directive into a DR scan into the Xilinx TAP. A
+tunneled DR scan consists of:
+@enumerate
+@item 1 bit that selects IR when 0, or DR when 1
+@item 7 bits that encode the width of the desired tunneled scan
+@item A width+1 stream of bits for the tunneled TDI. The plus one is because there is a one-clock skew between TDI of Xilinx chain and TDO from tunneled chain.
+@item 3 bits of zero that the tunnel uses to go back to idle state.
+@end enumerate
+
 @end deffn
 
 @deffn {Command} {riscv set_ebreakm} on|off
@@ -10868,15 +10431,17 @@ trivial challenge-response protocol could be implemented as follows in a
 configuration file, immediately following @command{init}:
 @example
 set challenge [riscv authdata_read]
-riscv authdata_write [expr @{$challenge + 1@}]
+riscv authdata_write [expr $challenge + 1]
 @end example
 
-@deffn {Command} {riscv authdata_read}
-Return the 32-bit value read from authdata.
+@deffn {Command} {riscv authdata_read} [index=0]
+Return the 32-bit value read from authdata or authdata0 (index=0), or
+authdata1 (index=1).
 @end deffn
 
-@deffn {Command} {riscv authdata_write} value
-Write the 32-bit value to authdata.
+@deffn {Command} {riscv authdata_write} [index=0] value
+Write the 32-bit value to authdata or authdata0 (index=0), or authdata1
+(index=1).
 @end deffn
 
 @subsection RISC-V DMI Commands
@@ -11026,94 +10591,6 @@ STMicroelectronics, based on a proprietary 8-bit core architecture.
 
 OpenOCD supports debugging STM8 through the STMicroelectronics debug
 protocol SWIM, @pxref{swimtransport,,SWIM}.
-
-@section Xtensa Architecture
-Xtensa processors are based on a modular, highly flexible 32-bit RISC architecture
-that can easily scale from a tiny, cache-less controller or task engine to a high-performance
-SIMD/VLIW DSP provided by Cadence.
-@url{https://www.cadence.com/en_US/home/tools/ip/tensilica-ip/tensilica-xtensa-controllers-and-extensible-processors.html}.
-
-OpenOCD supports generic Xtensa processors implementation which can be customized by
-simply providing vendor-specific core configuration which controls every configurable
-Xtensa architecture option, e.g. number of address registers, exceptions, reduced
-size instructions support, memory banks configuration etc. Also OpenOCD supports SMP
-configurations for Xtensa processors with any number of cores and allows to configure
-their debug signals interconnection (so-called "break/stall networks") which control how
-debug signals are distributed among cores. Xtensa "break networks" are compatible with
-ARM's Cross Trigger Interface (CTI). For debugging code on Xtensa chips OpenOCD
-uses JTAG protocol. Currently OpenOCD implements several Epsressif Xtensa-based chips of
-@uref{https://www.espressif.com/en/products/socs, ESP32 family}.
-
-@subsection General Xtensa Commands
-
-@deffn {Command} {xtensa set_permissive} (0|1)
-By default accessing memory beyond defined regions is forbidden. This commnd controls memory access address check.
-When set to (1), skips access controls and address range check before read/write memory.
-@end deffn
-
-@deffn {Command} {xtensa maskisr} (on|off)
-Selects whether interrupts will be disabled during stepping over single instruction. The default configuration is (off).
-@end deffn
-
-@deffn {Command} {xtensa smpbreak} [none|breakinout|runstall] | [BreakIn] [BreakOut] [RunStallIn] [DebugModeOut]
-Configures debug signals connection ("break network") for currently selected core.
-@itemize @bullet
-@item @code{none} - Core's "break/stall network" is disconnected. Core is not affected by any debug
-signal from other cores.
-@item @code{breakinout} - Core's "break network" is fully connected (break inputs and outputs are enabled).
-Core will receive debug break signals from other cores and send such signals to them. For example when another core
-is stopped due to breakpoint hit this core will be stopped too and vice versa.
-@item @code{runstall} - Core's "stall network" is fully connected (stall inputs and outputs are enabled).
-This feature is not well implemented and tested yet.
-@item @code{BreakIn} - Core's "break-in" signal is enabled.
-Core will receive debug break signals from other cores. For example when another core is
-stopped due to breakpoint hit this core will be stopped too.
-@item @code{BreakOut} - Core's "break-out" signal is enabled.
-Core will send debug break signal to other cores. For example when this core is
-stopped due to breakpoint hit other cores with enabled break-in signals will be stopped too.
-@item @code{RunStallIn} - Core's "runstall-in" signal is enabled.
-This feature is not well implemented and tested yet.
-@item @code{DebugModeOut} - Core's "debugmode-out" signal is enabled.
-This feature is not well implemented and tested yet.
-@end itemize
-@end deffn
-
-@deffn {Command} {xtensa perfmon_enable} <counter_id> <select> [mask] [kernelcnt] [tracelevel]
-Enable and start performance counter.
-@itemize @bullet
-@item @code{counter_id} - Counter ID (0-1).
-@item @code{select} - Selects performance metric to be counted by the counter,
-e.g. 0 - CPU cycles, 2 - retired instructions.
-@item @code{mask} - Selects input subsets to be counted (counter will
-increment only once even if more than one condition corresponding to a mask bit occurs).
-@item @code{kernelcnt} - 0 - count events with "CINTLEVEL <= tracelevel",
-1 - count events with "CINTLEVEL > tracelevel".
-@item @code{tracelevel} - Compares this value to "CINTLEVEL" when deciding
-whether to count.
-@end itemize
-@end deffn
-
-@deffn {Command} {xtensa perfmon_dump} (counter_id)
-Dump performance counter value. If no argument specified, dumps all counters.
-@end deffn
-
-@deffn {Command} {xtensa tracestart} [pc <pcval>/[<maskbitcount>]] [after <n> [ins|words]]
-Set up and start a HW trace. Optionally set PC address range to trigger tracing stop when reached during program execution.
-This command also allows to specify the amount of data to capture after stop trigger activation.
-@itemize @bullet
-@item @code{pcval} - PC value which will trigger trace data collection stop.
-@item @code{maskbitcount} - PC value mask.
-@item @code{n} - Maximum number of instructions/words to capture after trace stop trigger.
-@end itemize
-@end deffn
-
-@deffn {Command} {xtensa tracestop}
-Stop current trace as started by the tracestart command.
-@end deffn
-
-@deffn {Command} {xtensa tracedump} <outfile>
-Dump trace memory to a file.
-@end deffn
 
 @anchor{softwaredebugmessagesandtracing}
 @section Software Debug Messages and Tracing
@@ -11915,6 +11392,57 @@ The @command{step} and @command{stepi} commands can be used to step a specific c
 while other cores are free-running or remain halted, depending on the
 scheduler-locking mode configured in GDB.
 
+@section Legacy SMP core switching support
+@quotation Note
+This method is deprecated in favor of the @emph{hwthread} pseudo RTOS.
+@end quotation
+
+For SMP support following GDB serial protocol packet have been defined :
+@itemize @bullet
+@item j - smp status request
+@item J - smp set request
+@end itemize
+
+OpenOCD implements :
+@itemize @bullet
+@item @option{jc} packet for reading core id displayed by
+GDB connection. Reply is @option{XXXXXXXX} (8 hex digits giving core id) or
+ @option{E01} for target not smp.
+@item @option{JcXXXXXXXX} (8 hex digits) packet for setting core id displayed at next GDB continue
+(core id -1 is reserved for returning to normal resume mode). Reply @option{E01}
+for target not smp or @option{OK} on success.
+@end itemize
+
+Handling of this packet within GDB can be done :
+@itemize @bullet
+@item by the creation of an internal variable (i.e @option{_core}) by mean
+of function allocate_computed_value allowing following GDB command.
+@example
+set $_core 1
+#Jc01 packet is sent
+print $_core
+#jc packet is sent and result is affected in $
+@end example
+
+@item by the usage of GDB maintenance command as described in following example (2 cpus in SMP with
+core id 0 and 1 @pxref{definecputargetsworkinginsmp,,Define CPU targets working in SMP}).
+
+@example
+# toggle0 : force display of coreid 0
+define toggle0
+maint packet Jc0
+continue
+main packet Jc-1
+end
+# toggle1 : force display of coreid 1
+define toggle1
+maint packet Jc1
+continue
+main packet Jc-1
+end
+@end example
+@end itemize
+
 @node Tcl Scripting API
 @chapter Tcl Scripting API
 @cindex Tcl Scripting API
@@ -11966,7 +11494,13 @@ should be passed in to the proc in question.
 By "low-level", we mean commands that a human would typically not
 invoke directly.
 
-@itemize
+@itemize @bullet
+@item @b{mem2array} <@var{varname}> <@var{width}> <@var{addr}> <@var{nelems}>
+
+Read memory and return as a Tcl array for script processing
+@item @b{array2mem} <@var{varname}> <@var{width}> <@var{addr}> <@var{nelems}>
+
+Convert a Tcl array to memory locations and write the values
 @item @b{flash banks} <@var{driver}> <@var{base}> <@var{size}> <@var{chip_width}> <@var{bus_width}> <@var{target}> [@option{driver options} ...]
 
 Return information about the flash banks
@@ -12482,7 +12016,7 @@ It sort of works like this:
 When the command ``proc'' is parsed (which creates a procedure
 function) it gets 3 parameters on the command line. @b{1} the name of
 the proc (function), @b{2} the list of parameters, and @b{3} the body
-of the function. Note the choice of words: LIST and BODY. The PROC
+of the function. Not the choice of words: LIST and BODY. The PROC
 command stores these items in a table somewhere so it can be found by
 ``LookupCommand()''
 
@@ -12608,7 +12142,7 @@ it reads a file and executes as a script.
 @example
     set x 6
     set y 7
-    puts [format "The answer: %d" [expr @{$x * $y@}]]
+    puts [format "The answer: %d" [expr $x * $y]]
 @end example
 @enumerate
 @item The SET command creates 2 variables, X and Y.
@@ -12679,13 +12213,13 @@ proc myproc @{ @} @{
 @b{Dynamic variable creation}
 @example
 # Dynamically create a bunch of variables.
-for @{ set x 0 @} @{ $x < 32 @} @{ set x [expr @{$x + 1@}]@} @{
+for @{ set x 0 @} @{ $x < 32 @} @{ set x [expr $x + 1]@} @{
     # Create var name
     set vn [format "BIT%d" $x]
     # Make it a global
     global $vn
     # Set it.
-    set $vn [expr @{1 << $x@}]
+    set $vn [expr (1 << $x)]
 @}
 @end example
 @b{Dynamic proc/command creation}

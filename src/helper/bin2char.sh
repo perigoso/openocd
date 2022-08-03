@@ -1,5 +1,4 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-2.0-or-later
 
 [ $# != 0 ] && {
     echo "Usage: $0"

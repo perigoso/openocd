@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -15,6 +13,19 @@
  *                                                                         *
  *   Copyright (C) ST-Ericsson SA 2011                                     *
  *   michel.jaouen@stericsson.com : smp minimum support                    *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifndef OPENOCD_TARGET_TARGET_H
@@ -189,10 +200,8 @@ struct target {
 	bool rtos_auto_detect;				/* A flag that indicates that the RTOS has been specified as "auto"
 										 * and must be detected when symbols are offered */
 	struct backoff_timer backoff;
-	int smp;							/* Unique non-zero number for each SMP group */
-	struct list_head *smp_targets;		/* list all targets in this smp group/cluster
-										 * The head of the list is shared between the
-										 * cluster, thus here there is a pointer */
+	int smp;							/* add some target attributes for smp support */
+	struct target_list *head;
 	/* the gdb service is there in case of smp, we have only one gdb server
 	 * for all smp target
 	 * the target attached to the gdb is changing dynamically by changing
@@ -211,8 +220,8 @@ struct target {
 };
 
 struct target_list {
-	struct list_head lh;
 	struct target *target;
+	struct target_list *next;
 };
 
 struct gdb_fileio_info {
@@ -285,15 +294,6 @@ enum target_event {
 	TARGET_EVENT_GDB_FLASH_WRITE_END,
 
 	TARGET_EVENT_TRACE_CONFIG,
-
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x100 = 0x100, /* semihosting allows user cmds from 0x100 to 0x1ff */
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x101 = 0x101,
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x102 = 0x102,
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x103 = 0x103,
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x104 = 0x104,
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x105 = 0x105,
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x106 = 0x106,
-	TARGET_EVENT_SEMIHOSTING_USER_CMD_0x107 = 0x107,
 };
 
 struct target_event_action {
@@ -781,7 +781,7 @@ void target_handle_event(struct target *t, enum target_event e);
 
 void target_handle_md_output(struct command_invocation *cmd,
 	struct target *target, target_addr_t address, unsigned size,
-	unsigned count, const uint8_t *buffer);
+	unsigned count, const uint8_t *buffer, bool include_address);
 
 int target_profiling_default(struct target *target, uint32_t *samples, uint32_t
 		max_num_samples, uint32_t *num_samples, uint32_t seconds);

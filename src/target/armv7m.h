@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -9,6 +7,19 @@
  *                                                                         *
  *   Copyright (C) 2008 by Spencer Oliver                                  *
  *   spen@spen-soft.co.uk                                                  *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifndef OPENOCD_TARGET_ARMV7M_H
@@ -244,48 +255,15 @@ struct armv7m_common {
 	void (*pre_restore_context)(struct target *target);
 };
 
-static inline bool is_armv7m(const struct armv7m_common *armv7m)
-{
-	return armv7m->common_magic == ARMV7M_COMMON_MAGIC;
-}
-
-/**
- * @returns the pointer to the target specific struct
- * without matching a magic number.
- * Use in target specific service routines, where the correct
- * type of arch_info is certain.
- */
 static inline struct armv7m_common *
 target_to_armv7m(struct target *target)
 {
 	return container_of(target->arch_info, struct armv7m_common, arm);
 }
 
-/**
- * @returns the pointer to the target specific struct
- * or NULL if the magic number does not match.
- * Use in a flash driver or any place where mismatch of the arch_info
- * type can happen.
- */
-static inline struct armv7m_common *
-target_to_armv7m_safe(struct target *target)
+static inline bool is_armv7m(const struct armv7m_common *armv7m)
 {
-	if (!target)
-		return NULL;
-
-	if (!target->arch_info)
-		return NULL;
-
-	/* Check the parent type first to prevent peeking memory too far
-	 * from arch_info pointer */
-	if (!is_arm(target_to_arm(target)))
-		return NULL;
-
-	struct armv7m_common *armv7m = target_to_armv7m(target);
-	if (!is_armv7m(armv7m))
-		return NULL;
-
-	return armv7m;
+	return armv7m->common_magic == ARMV7M_COMMON_MAGIC;
 }
 
 struct armv7m_algorithm {

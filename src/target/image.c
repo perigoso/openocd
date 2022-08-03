@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2007 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -15,6 +13,19 @@
  *                                                                         *
  *   Copyright (C) 2018 by Advantest                                       *
  *   florian.meister@advantest.com                                         *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -585,7 +596,7 @@ static int image_elf64_read_headers(struct image *image)
 				image->sections[j].base_address = field64(elf,
 						elf->segments64[i].p_paddr);
 			image->sections[j].private = &elf->segments64[i];
-			image->sections[j].flags = field64(elf, elf->segments64[i].p_flags);
+			image->sections[j].flags = field32(elf, elf->segments64[i].p_flags);
 			j++;
 		}
 	}
@@ -1157,7 +1168,7 @@ int image_read_section(struct image *image,
 	return ERROR_OK;
 }
 
-int image_add_section(struct image *image, target_addr_t base, uint32_t size, uint64_t flags, uint8_t const *data)
+int image_add_section(struct image *image, target_addr_t base, uint32_t size, int flags, uint8_t const *data)
 {
 	struct imagesection *section;
 

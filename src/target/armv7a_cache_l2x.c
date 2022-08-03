@@ -1,8 +1,19 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2015 by Oleksij Rempel                                  *
  *   linux@rempel-privat.de                                                *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -16,7 +27,6 @@
 #include <helper/time_support.h>
 #include "target.h"
 #include "target_type.h"
-#include "smp.h"
 
 static int arm7a_l2x_sanity_check(struct target *target)
 {
@@ -184,7 +194,8 @@ static int arm7a_handle_l2x_cache_info_command(struct command_invocation *cmd,
 static int armv7a_l2x_cache_init(struct target *target, uint32_t base, uint32_t way)
 {
 	struct armv7a_l2x_cache *l2x_cache;
-	struct target_list *head;
+	struct target_list *head = target->head;
+	struct target *curr;
 
 	struct armv7a_common *armv7a = target_to_armv7a(target);
 	if (armv7a->armv7a_mmu.armv7a_cache.outer_cache) {
@@ -199,8 +210,8 @@ static int armv7a_l2x_cache_init(struct target *target, uint32_t base, uint32_t 
 
 	/*  initialize all targets in this cluster (smp target)
 	 *  l2 cache must be configured after smp declaration */
-	foreach_smp_target(head, target->smp_targets) {
-		struct target *curr = head->target;
+	while (head) {
+		curr = head->target;
 		if (curr != target) {
 			armv7a = target_to_armv7a(curr);
 			if (armv7a->armv7a_mmu.armv7a_cache.outer_cache) {
@@ -209,6 +220,7 @@ static int armv7a_l2x_cache_init(struct target *target, uint32_t base, uint32_t 
 			}
 			armv7a->armv7a_mmu.armv7a_cache.outer_cache = l2x_cache;
 		}
+		head = head->next;
 	}
 	return ERROR_OK;
 }

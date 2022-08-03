@@ -10,10 +10,7 @@ struct riscv_program;
 #include "gdb_regs.h"
 #include "jtag/jtag.h"
 #include "target/register.h"
-#include "target/semihosting_common.h"
 #include <helper/command.h>
-
-#define RISCV_COMMON_MAGIC	0x52495356U
 
 /* The register cache is statically allocated. */
 #define RISCV_MAX_HARTS 1024
@@ -87,9 +84,7 @@ typedef struct {
 	char *name;
 } range_list_t;
 
-struct riscv_info {
-	unsigned int common_magic;
-
+typedef struct {
 	unsigned dtm_version;
 
 	struct command_context *cmd_ctx;
@@ -122,6 +117,9 @@ struct riscv_info {
 
 	/* The number of entries in the debug buffer. */
 	int debug_buffer_size;
+
+	/* This avoids invalidating the register cache too often. */
+	bool registers_initialized;
 
 	/* This hart contains an implicit ebreak at the end of the program buffer. */
 	bool impebreak;
@@ -229,7 +227,10 @@ struct riscv_info {
 
 	riscv_sample_config_t sample_config;
 	struct riscv_sample_buf sample_buf;
-};
+
+	/* Track when we were last asked to do something substantial. */
+	int64_t last_activity;
+} riscv_info_t;
 
 COMMAND_HELPER(riscv_print_info_line, const char *section, const char *key,
 			   unsigned int value);
@@ -265,18 +266,13 @@ extern bool riscv_ebreaku;
 
 /* Everything needs the RISC-V specific info structure, so here's a nice macro
  * that provides that. */
-static inline struct riscv_info *riscv_info(const struct target *target) __attribute__((unused));
-static inline struct riscv_info *riscv_info(const struct target *target)
+static inline riscv_info_t *riscv_info(const struct target *target) __attribute__((unused));
+static inline riscv_info_t *riscv_info(const struct target *target)
 {
 	assert(target->arch_info);
 	return target->arch_info;
 }
-#define RISCV_INFO(R) struct riscv_info *R = riscv_info(target);
-
-static inline bool is_riscv(const struct riscv_info *riscv_info)
-{
-	return riscv_info->common_magic == RISCV_COMMON_MAGIC;
-}
+#define RISCV_INFO(R) riscv_info_t *R = riscv_info(target);
 
 extern uint8_t ir_dtmcontrol[4];
 extern struct scan_field select_dtmcontrol;
@@ -322,7 +318,7 @@ int riscv_openocd_deassert_reset(struct target *target);
 /*** RISC-V Interface ***/
 
 /* Initializes the shared RISC-V structure. */
-void riscv_info_init(struct target *target, struct riscv_info *r);
+void riscv_info_init(struct target *target, riscv_info_t *r);
 
 /* Steps the hart that's currently selected in the RTOS, or if there is no RTOS
  * then the only hart. */
@@ -352,6 +348,11 @@ int riscv_set_register(struct target *target, enum gdb_regno i, riscv_reg_t v);
 /** Get register, from the cache if it's in there. */
 int riscv_get_register(struct target *target, riscv_reg_t *value,
 		enum gdb_regno r);
+/** Read the register into the cache, and mark it dirty so it will be restored
+ * before resuming. */
+int riscv_save_register(struct target *target, enum gdb_regno regid);
+/** Write all dirty registers to the target. */
+int riscv_flush_registers(struct target *target);
 
 /* Checks the state of the current hart -- "is_halted" checks the actual
  * on-device register. */
@@ -387,8 +388,13 @@ int riscv_hit_watchpoint(struct target *target, struct watchpoint **hit_wp_addre
 int riscv_init_registers(struct target *target);
 
 void riscv_semihosting_init(struct target *target);
-
-enum semihosting_result riscv_semihosting(struct target *target, int *retval);
+typedef enum {
+	SEMI_NONE,		/* Not halted for a semihosting call. */
+	SEMI_HANDLED,	/* Call handled, and target was resumed. */
+	SEMI_WAITING,	/* Call handled, target is halted waiting until we can resume. */
+	SEMI_ERROR		/* Something went wrong. */
+} semihosting_result_t;
+semihosting_result_t riscv_semihosting(struct target *target, int *retval);
 
 void riscv_add_bscan_tunneled_scan(struct target *target, struct scan_field *field,
 		riscv_bscan_tunneled_scan_context_t *ctxt);

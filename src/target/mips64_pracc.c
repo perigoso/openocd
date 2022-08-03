@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /*
  * Support for processors implementing MIPS64 instruction set
  *
@@ -11,6 +9,8 @@
  *       Copyright (C) 2008 by Spencer Oliver
  *       Copyright (C) 2008 by David T.L. Wong
  *       Copyright (C) 2010 by Konstantin Kostyukhin, Nikolay Shmyrev
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
 #ifdef HAVE_CONFIG_H

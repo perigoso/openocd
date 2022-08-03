@@ -1,8 +1,16 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
-/*
- * Copyright (C) 2016 by Matthias Welwarsky <matthias.welwarsky@sysgo.com>
- */
+/*****************************************************************************
+ *   Copyright (C) 2016 by Matthias Welwarsky <matthias.welwarsky@sysgo.com> *
+ *                                                                           *
+ *   This program is free software; you can redistribute it and/or modify    *
+ *   it under the terms of the GNU General Public License as published by    *
+ *   the Free Software Foundation; either version 2 of the License, or       *
+ *   (at your option) any later version.                                     *
+ *                                                                           *
+ *   This program is distributed in the hope that it will be useful,         *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of          *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           *
+ *   GNU General Public License for more details.                            *
+ ****************************************************************************/
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -21,7 +29,7 @@ struct mem_ap {
 	int common_magic;
 	struct adiv5_dap *dap;
 	struct adiv5_ap *ap;
-	uint64_t ap_num;
+	int ap_num;
 };
 
 static int mem_ap_target_create(struct target *target, Jim_Interp *interp)
@@ -66,12 +74,7 @@ static int mem_ap_init_target(struct command_context *cmd_ctx, struct target *ta
 
 static void mem_ap_deinit_target(struct target *target)
 {
-	struct mem_ap *mem_ap = target->arch_info;
-
 	LOG_DEBUG("%s", __func__);
-
-	if (mem_ap->ap)
-		dap_put_ap(mem_ap->ap);
 
 	free(target->private_config);
 	free(target->arch_info);
@@ -136,16 +139,7 @@ static int mem_ap_examine(struct target *target)
 	struct mem_ap *mem_ap = target->arch_info;
 
 	if (!target_was_examined(target)) {
-		if (mem_ap->ap) {
-			dap_put_ap(mem_ap->ap);
-			mem_ap->ap = NULL;
-		}
-
-		mem_ap->ap = dap_get_ap(mem_ap->dap, mem_ap->ap_num);
-		if (!mem_ap->ap) {
-			LOG_ERROR("Cannot get AP");
-			return ERROR_FAIL;
-		}
+		mem_ap->ap = dap_ap(mem_ap->dap, mem_ap->ap_num);
 		target_set_examined(target);
 		target->state = TARGET_UNKNOWN;
 		target->debug_reason = DBG_REASON_UNDEFINED;

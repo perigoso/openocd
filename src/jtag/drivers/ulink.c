@@ -1,8 +1,19 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2011-2013 by Martin Schmoelzer                          *
  *   <martin.schmoelzer@student.tuwien.ac.at>                              *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -44,6 +55,9 @@
 
 /** USB interface number */
 #define USB_INTERFACE            0
+
+/** libusb timeout in ms */
+#define USB_TIMEOUT              5000
 
 /** Delay (in microseconds) to wait while EZ-USB performs ReNumeration. */
 #define ULINK_RENUMERATION_DELAY 1500000
@@ -321,7 +335,7 @@ static int ulink_cpu_reset(struct ulink *device, unsigned char reset_bit)
 
 	ret = libusb_control_transfer(device->usb_device_handle,
 			(LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE),
-			REQUEST_FIRMWARE_LOAD, CPUCS_REG, 0, &reset_bit, 1, LIBUSB_TIMEOUT_MS);
+			REQUEST_FIRMWARE_LOAD, CPUCS_REG, 0, &reset_bit, 1, USB_TIMEOUT);
 
 	/* usb_control_msg() returns the number of bytes transferred during the
 	 * DATA stage of the control transfer - must be exactly 1 in this case! */
@@ -464,7 +478,7 @@ static int ulink_write_firmware_section(struct ulink *device,
 		ret = libusb_control_transfer(device->usb_device_handle,
 				(LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE),
 				REQUEST_FIRMWARE_LOAD, addr, FIRMWARE_ADDR, (unsigned char *)data_ptr,
-				chunk_size, LIBUSB_TIMEOUT_MS);
+				chunk_size, USB_TIMEOUT);
 
 		if (ret != (int)chunk_size) {
 			/* Abort if libusb sent less data than requested */
@@ -590,6 +604,8 @@ static int ulink_get_queue_size(struct ulink *device,
  * Clear the OpenULINK command queue.
  *
  * @param device pointer to struct ulink identifying ULINK driver instance.
+ * @return on success: ERROR_OK
+ * @return on failure: ERROR_FAIL
  */
 static void ulink_clear_queue(struct ulink *device)
 {
@@ -648,7 +664,7 @@ static int ulink_append_queue(struct ulink *device, struct ulink_cmd *ulink_cmd)
 	if ((newsize_out > 64) || (newsize_in > 64)) {
 		/* New command does not fit. Execute all commands in queue before starting
 		 * new queue with the current command as first entry. */
-		ret = ulink_execute_queued_commands(device, LIBUSB_TIMEOUT_MS);
+		ret = ulink_execute_queued_commands(device, USB_TIMEOUT);
 
 		if (ret == ERROR_OK)
 			ret = ulink_post_process_queue(device);
@@ -1946,7 +1962,7 @@ static int ulink_execute_queue(void)
 	}
 
 	if (ulink_handle->commands_in_queue > 0) {
-		ret = ulink_execute_queued_commands(ulink_handle, LIBUSB_TIMEOUT_MS);
+		ret = ulink_execute_queued_commands(ulink_handle, USB_TIMEOUT);
 		if (ret != ERROR_OK)
 			return ret;
 

@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -14,6 +12,19 @@
  *   hontor@126.com                                                        *
  *                                                                         *
  *   Copyright (C) 2009 by David Brownell                                  *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -82,20 +93,19 @@ static void arm7_9_assign_wp(struct arm7_9_common *arm7_9, struct breakpoint *br
 {
 	if (!arm7_9->wp0_used) {
 		arm7_9->wp0_used = 1;
-		breakpoint_hw_set(breakpoint, 0);
+		breakpoint->set = 1;
 		arm7_9->wp_available--;
 	} else if (!arm7_9->wp1_used) {
 		arm7_9->wp1_used = 1;
-		breakpoint_hw_set(breakpoint, 1);
+		breakpoint->set = 2;
 		arm7_9->wp_available--;
-	} else {
+	} else
 		LOG_ERROR("BUG: no hardware comparator available");
-	}
 
-	LOG_DEBUG("BPID: %" PRIu32 " (0x%08" TARGET_PRIxADDR ") using hw wp: %u",
+	LOG_DEBUG("BPID: %" PRIu32 " (0x%08" TARGET_PRIxADDR ") using hw wp: %d",
 			breakpoint->unique_id,
 			breakpoint->address,
-			breakpoint->number);
+			breakpoint->set);
 }
 
 /**
@@ -193,16 +203,16 @@ static int arm7_9_set_breakpoint(struct target *target, struct breakpoint *break
 		uint32_t mask = (breakpoint->length == 4) ? 0x3u : 0x1u;
 
 		/* reassign a hw breakpoint */
-		if (!breakpoint->is_set)
+		if (breakpoint->set == 0)
 			arm7_9_assign_wp(arm7_9, breakpoint);
 
-		if (breakpoint->number == 0) {
+		if (breakpoint->set == 1) {
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_ADDR_VALUE], breakpoint->address);
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_ADDR_MASK], mask);
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_DATA_MASK], 0xffffffffu);
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_CONTROL_MASK], ~EICE_W_CTRL_NOPC & 0xff);
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_CONTROL_VALUE], EICE_W_CTRL_ENABLE);
-		} else if (breakpoint->number == 1) {
+		} else if (breakpoint->set == 2) {
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W1_ADDR_VALUE], breakpoint->address);
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W1_ADDR_MASK], mask);
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W1_DATA_MASK], 0xffffffffu);
@@ -216,7 +226,7 @@ static int arm7_9_set_breakpoint(struct target *target, struct breakpoint *break
 		retval = jtag_execute_queue();
 	} else if (breakpoint->type == BKPT_SOFT) {
 		/* did we already set this breakpoint? */
-		if (breakpoint->is_set)
+		if (breakpoint->set)
 			return ERROR_OK;
 
 		if (breakpoint->length == 4) {
@@ -267,7 +277,7 @@ static int arm7_9_set_breakpoint(struct target *target, struct breakpoint *break
 
 		arm7_9->sw_breakpoint_count++;
 
-		breakpoint->is_set = true;
+		breakpoint->set = 1;
 	}
 
 	return retval;
@@ -294,7 +304,7 @@ static int arm7_9_unset_breakpoint(struct target *target, struct breakpoint *bre
 		breakpoint->unique_id,
 		breakpoint->address);
 
-	if (!breakpoint->is_set) {
+	if (!breakpoint->set) {
 		LOG_WARNING("breakpoint not set");
 		return ERROR_OK;
 	}
@@ -302,18 +312,18 @@ static int arm7_9_unset_breakpoint(struct target *target, struct breakpoint *bre
 	if (breakpoint->type == BKPT_HARD) {
 		LOG_DEBUG("BPID: %" PRIu32 " Releasing hw wp: %d",
 			breakpoint->unique_id,
-			breakpoint->is_set);
-		if (breakpoint->number == 0) {
+			breakpoint->set);
+		if (breakpoint->set == 1) {
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_CONTROL_VALUE], 0x0);
 			arm7_9->wp0_used = 0;
 			arm7_9->wp_available++;
-		} else if (breakpoint->number == 1) {
+		} else if (breakpoint->set == 2) {
 			embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W1_CONTROL_VALUE], 0x0);
 			arm7_9->wp1_used = 0;
 			arm7_9->wp_available++;
 		}
 		retval = jtag_execute_queue();
-		breakpoint->is_set = false;
+		breakpoint->set = 0;
 	} else {
 		/* restore original instruction (kept in target endianness) */
 		if (breakpoint->length == 4) {
@@ -358,7 +368,7 @@ static int arm7_9_unset_breakpoint(struct target *target, struct breakpoint *bre
 						EICE_W1_CONTROL_VALUE], 0);
 		}
 
-		breakpoint->is_set = false;
+		breakpoint->set = 0;
 	}
 
 	return retval;
@@ -481,7 +491,7 @@ static int arm7_9_set_watchpoint(struct target *target, struct watchpoint *watch
 		retval = jtag_execute_queue();
 		if (retval != ERROR_OK)
 			return retval;
-		watchpoint_set(watchpoint, 1);
+		watchpoint->set = 1;
 		arm7_9->wp0_used = 2;
 	} else if (!arm7_9->wp1_used) {
 		embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W1_ADDR_VALUE],
@@ -500,7 +510,7 @@ static int arm7_9_set_watchpoint(struct target *target, struct watchpoint *watch
 		retval = jtag_execute_queue();
 		if (retval != ERROR_OK)
 			return retval;
-		watchpoint_set(watchpoint, 2);
+		watchpoint->set = 2;
 		arm7_9->wp1_used = 2;
 	} else {
 		LOG_ERROR("BUG: no hardware comparator available");
@@ -528,25 +538,25 @@ static int arm7_9_unset_watchpoint(struct target *target, struct watchpoint *wat
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
-	if (!watchpoint->is_set) {
+	if (!watchpoint->set) {
 		LOG_WARNING("breakpoint not set");
 		return ERROR_OK;
 	}
 
-	if (watchpoint->number == 1) {
+	if (watchpoint->set == 1) {
 		embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W0_CONTROL_VALUE], 0x0);
 		retval = jtag_execute_queue();
 		if (retval != ERROR_OK)
 			return retval;
 		arm7_9->wp0_used = 0;
-	} else if (watchpoint->number == 2) {
+	} else if (watchpoint->set == 2) {
 		embeddedice_set_reg(&arm7_9->eice_cache->reg_list[EICE_W1_CONTROL_VALUE], 0x0);
 		retval = jtag_execute_queue();
 		if (retval != ERROR_OK)
 			return retval;
 		arm7_9->wp1_used = 0;
 	}
-	watchpoint->is_set = false;
+	watchpoint->set = 0;
 
 	return ERROR_OK;
 }
@@ -587,7 +597,7 @@ int arm7_9_remove_watchpoint(struct target *target, struct watchpoint *watchpoin
 	int retval = ERROR_OK;
 	struct arm7_9_common *arm7_9 = target_to_arm7_9(target);
 
-	if (watchpoint->is_set) {
+	if (watchpoint->set) {
 		retval = arm7_9_unset_watchpoint(target, watchpoint);
 		if (retval != ERROR_OK)
 			return retval;
@@ -1674,7 +1684,7 @@ static void arm7_9_enable_watchpoints(struct target *target)
 	struct watchpoint *watchpoint = target->watchpoints;
 
 	while (watchpoint) {
-		if (!watchpoint->is_set)
+		if (watchpoint->set == 0)
 			arm7_9_set_watchpoint(target, watchpoint);
 		watchpoint = watchpoint->next;
 	}

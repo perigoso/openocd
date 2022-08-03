@@ -12,6 +12,19 @@
  *                                                                         *
  *   Copyright (C) 2016 by Square, Inc.                                    *
  *   Steven Stallion <stallion@squareup.com>                               *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 /**
@@ -31,6 +44,7 @@
 #include <helper/log.h>
 
 #include "target/target.h"
+#include "target/semihosting_common.h"
 #include "riscv.h"
 
 static int riscv_semihosting_setup(struct target *target, int enable);
@@ -53,23 +67,23 @@ void riscv_semihosting_init(struct target *target)
  * @param retval Pointer to a location where the return code will be stored
  * @return non-zero value if a request was processed or an error encountered
  */
-enum semihosting_result riscv_semihosting(struct target *target, int *retval)
+semihosting_result_t riscv_semihosting(struct target *target, int *retval)
 {
 	struct semihosting *semihosting = target->semihosting;
 	if (!semihosting) {
 		LOG_DEBUG("   -> NONE (!semihosting)");
-		return SEMIHOSTING_NONE;
+		return SEMI_NONE;
 	}
 
 	if (!semihosting->is_active) {
 		LOG_DEBUG("   -> NONE (!semihosting->is_active)");
-		return SEMIHOSTING_NONE;
+		return SEMI_NONE;
 	}
 
 	riscv_reg_t pc;
 	int result = riscv_get_register(target, &pc, GDB_REGNO_PC);
 	if (result != ERROR_OK)
-		return SEMIHOSTING_ERROR;
+		return SEMI_ERROR;
 
 	uint8_t tmp_buf[12];
 
@@ -78,7 +92,7 @@ enum semihosting_result riscv_semihosting(struct target *target, int *retval)
 		/* Instruction memories may not support arbitrary read size. Use any size that will work. */
 		*retval = riscv_read_by_any_size(target, (pc - 4) + 4 * i, 4, tmp_buf + 4 * i);
 		if (*retval != ERROR_OK)
-			return SEMIHOSTING_ERROR;
+			return SEMI_ERROR;
 	}
 
 	/*
@@ -97,7 +111,7 @@ enum semihosting_result riscv_semihosting(struct target *target, int *retval)
 	if (pre != 0x01f01013 || ebreak != 0x00100073 || post != 0x40705013) {
 		/* Not the magic sequence defining semihosting. */
 		LOG_DEBUG("   -> NONE (no magic)");
-		return SEMIHOSTING_NONE;
+		return SEMI_NONE;
 	}
 
 	/*
@@ -112,13 +126,13 @@ enum semihosting_result riscv_semihosting(struct target *target, int *retval)
 		result = riscv_get_register(target, &r0, GDB_REGNO_A0);
 		if (result != ERROR_OK) {
 			LOG_DEBUG("   -> ERROR (couldn't read a0)");
-			return SEMIHOSTING_ERROR;
+			return SEMI_ERROR;
 		}
 
 		result = riscv_get_register(target, &r1, GDB_REGNO_A1);
 		if (result != ERROR_OK) {
 			LOG_DEBUG("   -> ERROR (couldn't read a1)");
-			return SEMIHOSTING_ERROR;
+			return SEMI_ERROR;
 		}
 
 		semihosting->op = r0;
@@ -126,18 +140,16 @@ enum semihosting_result riscv_semihosting(struct target *target, int *retval)
 		semihosting->word_size_bytes = riscv_xlen(target) / 8;
 
 		/* Check for ARM operation numbers. */
-		if ((semihosting->op >= 0 && semihosting->op <= 0x31) ||
-			(semihosting->op >= 0x100 && semihosting->op <= 0x107)) {
-
+		if (semihosting->op >= 0 && semihosting->op <= 0x31) {
 			*retval = semihosting_common(target);
 			if (*retval != ERROR_OK) {
 				LOG_ERROR("Failed semihosting operation (0x%02X)", semihosting->op);
-				return SEMIHOSTING_ERROR;
+				return SEMI_ERROR;
 			}
 		} else {
 			/* Unknown operation number, not a semihosting call. */
 			LOG_DEBUG("   -> NONE (unknown operation number)");
-			return SEMIHOSTING_NONE;
+			return SEMI_NONE;
 		}
 	}
 
@@ -149,14 +161,14 @@ enum semihosting_result riscv_semihosting(struct target *target, int *retval)
 		/* Resume right after the EBREAK 4 bytes instruction. */
 		*retval = riscv_set_register(target, GDB_REGNO_PC, pc + 4);
 		if (*retval != ERROR_OK)
-			return SEMIHOSTING_ERROR;
+			return SEMI_ERROR;
 
 		LOG_DEBUG("   -> HANDLED");
-		return SEMIHOSTING_HANDLED;
+		return SEMI_HANDLED;
 	}
 
 	LOG_DEBUG("   -> WAITING");
-	return SEMIHOSTING_WAITING;
+	return SEMI_WAITING;
 }
 
 /* -------------------------------------------------------------------------

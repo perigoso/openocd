@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
@@ -21,6 +19,19 @@
  *                                                                         *
  *   Copyright (C) 2013 Franck Jullien                                     *
  *   elec4fun@gmail.com                                                    *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -49,14 +60,12 @@
  * giving GDB access to the JTAG or other hardware debugging facilities
  * found in most modern embedded processors.
  */
-
-enum gdb_output_flag {
-	/* GDB doesn't accept 'O' packets */
-	GDB_OUTPUT_NO,
-	/* GDB accepts 'O' packets */
-	GDB_OUTPUT_ALL,
-};
-
+extern bool wchwlink;
+extern int wlink_quitreset(void);
+extern unsigned char riscvchip;
+extern uint8_t armchip;
+extern void wlink_armquitreset(void);
+int gdb_actual_connections;
 struct target_desc_format {
 	char *tdesc;
 	uint32_t tdesc_length;
@@ -93,8 +102,6 @@ struct gdb_connection {
 	struct target_desc_format target_desc;
 	/* temporarily used for thread list support */
 	char *thread_list;
-	/* flag to mask the output from gdb_log_callback() */
-	enum gdb_output_flag output_flag;
 };
 
 #if 0
@@ -360,12 +367,10 @@ static int gdb_write(struct connection *connection, void *data, int len)
 	return ERROR_SERVER_REMOTE_CLOSED;
 }
 
-static void gdb_log_incoming_packet(struct connection *connection, char *packet)
+static void gdb_log_incoming_packet(char *packet)
 {
 	if (!LOG_LEVEL_IS(LOG_LVL_DEBUG))
 		return;
-
-	struct target *target = get_target_from_connection(connection);
 
 	/* Avoid dumping non-printable characters to the terminal */
 	const unsigned packet_len = strlen(packet);
@@ -380,31 +385,25 @@ static void gdb_log_incoming_packet(struct connection *connection, char *packet)
 		if (packet_prefix_printable) {
 			const unsigned int prefix_len = colon - packet + 1;  /* + 1 to include the ':' */
 			const unsigned int payload_len = packet_len - prefix_len;
-			LOG_TARGET_DEBUG(target, "received packet: %.*s<binary-data-%u-bytes>", prefix_len,
-				packet, payload_len);
+			LOG_DEBUG("received packet: %.*s<binary-data-%u-bytes>", prefix_len, packet, payload_len);
 		} else {
-			LOG_TARGET_DEBUG(target, "received packet: <binary-data-%u-bytes>", packet_len);
+			LOG_DEBUG("received packet: <binary-data-%u-bytes>", packet_len);
 		}
 	} else {
 		/* All chars printable, dump the packet as is */
-		LOG_TARGET_DEBUG(target, "received packet: %s", packet);
+		LOG_DEBUG("received packet: %s", packet);
 	}
 }
 
-static void gdb_log_outgoing_packet(struct connection *connection, char *packet_buf,
-	unsigned int packet_len, unsigned char checksum)
+static void gdb_log_outgoing_packet(char *packet_buf, unsigned int packet_len, unsigned char checksum)
 {
 	if (!LOG_LEVEL_IS(LOG_LVL_DEBUG))
 		return;
 
-	struct target *target = get_target_from_connection(connection);
-
 	if (find_nonprint_char(packet_buf, packet_len))
-		LOG_TARGET_DEBUG(target, "sending packet: $<binary-data-%u-bytes>#%2.2x",
-			packet_len, checksum);
+		LOG_DEBUG("sending packet: $<binary-data-%u-bytes>#%2.2x", packet_len, checksum);
 	else
-		LOG_TARGET_DEBUG(target, "sending packet: $%.*s#%2.2x", packet_len, packet_buf,
-			checksum);
+		LOG_DEBUG("sending packet: $%.*s#%2.2x'", packet_len, packet_buf, checksum);
 }
 
 static int gdb_put_packet_inner(struct connection *connection,
@@ -424,6 +423,8 @@ static int gdb_put_packet_inner(struct connection *connection,
 	 * At this point we should have nothing in the input queue from GDB,
 	 * however sometimes '-' is sent even though we've already received
 	 * an ACK (+) for everything we've sent off.
+	 *
+	 * This code appears to sometimes eat a ^C coming from gdb.
 	 */
 	int gotdata;
 	for (;; ) {
@@ -442,13 +443,13 @@ static int gdb_put_packet_inner(struct connection *connection,
 			break;
 		}
 
-		LOG_WARNING("Discard unexpected char %c", reply);
+		LOG_DEBUG("Discard unexpected char %c", reply);
 	}
 #endif
 
 	while (1) {
-		gdb_log_outgoing_packet(connection, buffer, len, my_checksum);
-
+		gdb_log_outgoing_packet(buffer, len, my_checksum);
+               // LOG_INFO("sending packet '$%s#%2.2x'", debug_buffer, my_checksum);
 		char local_buffer[1024];
 		local_buffer[0] = '$';
 		if ((size_t)len + 4 <= sizeof(local_buffer)) {
@@ -480,27 +481,22 @@ static int gdb_put_packet_inner(struct connection *connection,
 		if (retval != ERROR_OK)
 			return retval;
 
-		if (reply == '+') {
-			gdb_log_incoming_packet(connection, "+");
+		if (reply == '+')
 			break;
-		} else if (reply == '-') {
+		else if (reply == '-') {
 			/* Stop sending output packets for now */
-			gdb_con->output_flag = GDB_OUTPUT_NO;
-			gdb_log_incoming_packet(connection, "-");
+			log_remove_callback(gdb_log_callback, connection);
 			LOG_WARNING("negative reply, retrying");
 		} else if (reply == 0x3) {
 			gdb_con->ctrl_c = true;
-			gdb_log_incoming_packet(connection, "<Ctrl-C>");
 			retval = gdb_get_char(connection, &reply);
 			if (retval != ERROR_OK)
 				return retval;
-			if (reply == '+') {
-				gdb_log_incoming_packet(connection, "+");
+			if (reply == '+')
 				break;
-			} else if (reply == '-') {
+			else if (reply == '-') {
 				/* Stop sending output packets for now */
-				gdb_con->output_flag = GDB_OUTPUT_NO;
-				gdb_log_incoming_packet(connection, "-");
+				log_remove_callback(gdb_log_callback, connection);
 				LOG_WARNING("negative reply, retrying");
 			} else if (reply == '$') {
 				LOG_ERROR("GDB missing ack(1) - assumed good");
@@ -677,7 +673,6 @@ static int gdb_get_packet_inner(struct connection *connection,
 				case '$':
 					break;
 				case '+':
-					gdb_log_incoming_packet(connection, "+");
 					/* According to the GDB documentation
 					 * (https://sourceware.org/gdb/onlinedocs/gdb/Packet-Acknowledgment.html):
 					 * "gdb sends a final `+` acknowledgment of the stub's `OK`
@@ -695,11 +690,9 @@ static int gdb_get_packet_inner(struct connection *connection,
 					}
 					break;
 				case '-':
-					gdb_log_incoming_packet(connection, "-");
 					LOG_WARNING("negative acknowledgment, but no packet pending");
 					break;
 				case 0x3:
-					gdb_log_incoming_packet(connection, "<Ctrl-C>");
 					gdb_con->ctrl_c = true;
 					*len = 0;
 					return ERROR_OK;
@@ -946,7 +939,7 @@ static void gdb_frontend_halted(struct target *target, struct connection *connec
 	 */
 	if (gdb_connection->frontend_state == TARGET_RUNNING) {
 		/* stop forwarding log packets! */
-		gdb_connection->output_flag = GDB_OUTPUT_NO;
+		log_remove_callback(gdb_log_callback, connection);
 
 		/* check fileio first */
 		if (target_get_gdb_fileio_info(target, target->fileio_info) == ERROR_OK)
@@ -1006,7 +999,6 @@ static int gdb_new_connection(struct connection *connection)
 	gdb_connection->target_desc.tdesc = NULL;
 	gdb_connection->target_desc.tdesc_length = 0;
 	gdb_connection->thread_list = NULL;
-	gdb_connection->output_flag = GDB_OUTPUT_NO;
 
 	/* send ACK to GDB for debug request */
 	gdb_write(connection, "+", 1);
@@ -1090,8 +1082,6 @@ static int gdb_new_connection(struct connection *connection)
 	 *
 	 * register callback to be informed about target events */
 	target_register_event_callback(gdb_target_callback_event_handler, connection);
-
-	log_add_callback(gdb_log_callback, connection);
 
 	return ERROR_OK;
 }
@@ -1495,7 +1485,7 @@ static int gdb_read_memory_packet(struct connection *connection,
 	uint8_t *buffer;
 	char *hex_buffer;
 
-	int retval = ERROR_OK;
+	int retval;
 
 	/* skip command character */
 	packet++;
@@ -1730,9 +1720,22 @@ static int gdb_breakpoint_watchpoint_packet(struct connection *connection,
 	int retval;
 
 	LOG_DEBUG("[%s]", target_name(target));
-
 	type = strtoul(packet + 1, &separator, 16);
-
+	if(wchwlink){
+		if(riscvchip==6 && type==1 && target->breakpoints ){
+			struct breakpoint *p= target->breakpoints->next;
+			int len=0;
+			while(p){
+				len++;
+				p=p->next;
+			}
+			if(len>2)
+				type=0;		
+		}
+		if(riscvchip==1||riscvchip==2||riscvchip==3){
+			type=0;
+		}
+	}
 	if (type == 0)	/* memory breakpoint */
 		bp_type = BKPT_SOFT;
 	else if (type == 1)	/* hardware breakpoint */
@@ -2288,25 +2291,21 @@ static int smp_reg_list_noread(struct target *target,
 		return target_get_gdb_reg_list_noread(target, combined_list,
 				combined_list_size, REG_CLASS_ALL);
 
-	unsigned int combined_allocated = 256;
-	struct reg **local_list = malloc(combined_allocated * sizeof(struct reg *));
-	if (!local_list) {
-		LOG_ERROR("malloc(%zu) failed", combined_allocated * sizeof(struct reg *));
+	int combined_allocated = 256;
+	*combined_list = malloc(combined_allocated * sizeof(struct reg *));
+	if (*combined_list == NULL) {
+		LOG_ERROR("malloc(%d) failed", (int) (combined_allocated * sizeof(struct reg *)));
 		return ERROR_FAIL;
 	}
-	unsigned int local_list_size = 0;
-
+	*combined_list_size = 0;
 	struct target_list *head;
-	foreach_smp_target(head, target->smp_targets) {
-		if (!target_was_examined(head->target))
-			continue;
-
+	foreach_smp_target(head, target->head) {
 		struct reg **reg_list = NULL;
 		int reg_list_size;
 		int result = target_get_gdb_reg_list_noread(head->target, &reg_list,
 				&reg_list_size, reg_class);
 		if (result != ERROR_OK) {
-			free(local_list);
+			free(*combined_list);
 			return result;
 		}
 		for (int i = 0; i < reg_list_size; i++) {
@@ -2316,8 +2315,8 @@ static int smp_reg_list_noread(struct target *target,
 				/* Nested loop makes this O(n^2), but this entire function with
 				 * 5 RISC-V targets takes just 2ms on my computer. Fast enough
 				 * for me. */
-				for (unsigned int j = 0; j < local_list_size; j++) {
-					struct reg *b = local_list[j];
+				for (int j = 0; j < *combined_list_size; j++) {
+					struct reg *b = (*combined_list)[j];
 					if (!strcmp(a->name, b->name)) {
 						found = true;
 						if (a->size != b->size) {
@@ -2325,7 +2324,7 @@ static int smp_reg_list_noread(struct target *target,
 									"target, but %d bits on another target.",
 									a->name, a->size, b->size);
 							free(reg_list);
-							free(local_list);
+							free(*combined_list);
 							return ERROR_FAIL;
 						}
 						break;
@@ -2333,62 +2332,22 @@ static int smp_reg_list_noread(struct target *target,
 				}
 				if (!found) {
 					LOG_DEBUG("[%s] %s not found in combined list", target_name(target), a->name);
-					if (local_list_size >= combined_allocated) {
+					if (*combined_list_size >= combined_allocated) {
 						combined_allocated *= 2;
-						local_list = realloc(local_list, combined_allocated * sizeof(struct reg *));
-						if (!local_list) {
-							LOG_ERROR("realloc(%zu) failed", combined_allocated * sizeof(struct reg *));
+						*combined_list = realloc(*combined_list, combined_allocated * sizeof(struct reg *));
+						if (*combined_list == NULL) {
+							LOG_ERROR("realloc(%d) failed", (int) (combined_allocated * sizeof(struct reg *)));
 							return ERROR_FAIL;
 						}
 					}
-					local_list[local_list_size] = a;
-					local_list_size++;
+					(*combined_list)[*combined_list_size] = a;
+					(*combined_list_size)++;
 				}
 			}
 		}
 		free(reg_list);
 	}
 
-	if (local_list_size == 0) {
-		LOG_ERROR("Unable to get register list");
-		free(local_list);
-		return ERROR_FAIL;
-	}
-
-	/* Now warn the user about any registers that weren't found in every target. */
-	foreach_smp_target(head, target->smp_targets) {
-		if (!target_was_examined(head->target))
-			continue;
-
-		struct reg **reg_list = NULL;
-		int reg_list_size;
-		int result = target_get_gdb_reg_list_noread(head->target, &reg_list,
-				&reg_list_size, reg_class);
-		if (result != ERROR_OK) {
-			free(local_list);
-			return result;
-		}
-		for (unsigned int i = 0; i < local_list_size; i++) {
-			bool found = false;
-			struct reg *a = local_list[i];
-			for (int j = 0; j < reg_list_size; j++) {
-				struct reg *b = reg_list[j];
-				if (b->exist && !strcmp(a->name, b->name)) {
-					found = true;
-					break;
-				}
-			}
-			if (!found) {
-				LOG_WARNING("Register %s does not exist in %s, which is part of an SMP group where "
-					    "this register does exist.",
-					    a->name, target_name(head->target));
-			}
-		}
-		free(reg_list);
-	}
-
-	*combined_list = local_list;
-	*combined_list_size = local_list_size;
 	return ERROR_OK;
 }
 
@@ -2600,6 +2559,7 @@ static int gdb_target_description_supported(struct target *target, int *supporte
 			&reg_list_size, REG_CLASS_ALL);
 	if (retval != ERROR_OK) {
 		LOG_ERROR("get register list failed");
+		reg_list = NULL;
 		goto error;
 	}
 
@@ -2650,14 +2610,8 @@ static int gdb_generate_thread_list(struct target *target, char **thread_list_ou
 			if (!thread_detail->exists)
 				continue;
 
-			if (thread_detail->thread_name_str)
-				xml_printf(&retval, &thread_list, &pos, &size,
-					   "<thread id=\"%" PRIx64 "\" name=\"%s\">",
-					   thread_detail->threadid,
-					   thread_detail->thread_name_str);
-			else
-				xml_printf(&retval, &thread_list, &pos, &size,
-					   "<thread id=\"%" PRIx64 "\">", thread_detail->threadid);
+			xml_printf(&retval, &thread_list, &pos, &size,
+				   "<thread id=\"%" PRIx64 "\">", thread_detail->threadid);
 
 			if (thread_detail->thread_name_str)
 				xml_printf(&retval, &thread_list, &pos, &size,
@@ -2739,75 +2693,23 @@ static int gdb_query_packet(struct connection *connection,
 
 	if (strncmp(packet, "qRcmd,", 6) == 0) {
 		if (packet_size > 6) {
-			Jim_Interp *interp = cmd_ctx->interp;
 			char *cmd;
 			cmd = malloc((packet_size - 6) / 2 + 1);
 			size_t len = unhexify((uint8_t *)cmd, packet + 6, (packet_size - 6) / 2);
 			cmd[len] = 0;
+			LOG_DEBUG("qRcmd: %s", cmd);
 
 			/* We want to print all debug output to GDB connection */
-			gdb_connection->output_flag = GDB_OUTPUT_ALL;
+			log_add_callback(gdb_log_callback, connection);
 			target_call_timer_callbacks_now();
 			/* some commands need to know the GDB connection, make note of current
 			 * GDB connection. */
 			current_gdb_connection = gdb_connection;
-
-			struct target *saved_target_override = cmd_ctx->current_target_override;
-			cmd_ctx->current_target_override = NULL;
-
-			struct command_context *old_context = Jim_GetAssocData(interp, "context");
-			Jim_DeleteAssocData(interp, "context");
-			int retval = Jim_SetAssocData(interp, "context", NULL, cmd_ctx);
-			if (retval == JIM_OK) {
-				retval = Jim_EvalObj(interp, Jim_NewStringObj(interp, cmd, -1));
-				Jim_DeleteAssocData(interp, "context");
-			}
-			int inner_retval = Jim_SetAssocData(interp, "context", NULL, old_context);
-			if (retval == JIM_OK)
-				retval = inner_retval;
-
-			cmd_ctx->current_target_override = saved_target_override;
-
+			command_run_line(cmd_ctx, cmd);
 			current_gdb_connection = NULL;
 			target_call_timer_callbacks_now();
-			gdb_connection->output_flag = GDB_OUTPUT_NO;
+			log_remove_callback(gdb_log_callback, connection);
 			free(cmd);
-			if (retval == JIM_RETURN)
-				retval = interp->returnCode;
-			int lenmsg;
-			const char *cretmsg = Jim_GetString(Jim_GetResult(interp), &lenmsg);
-			char *retmsg;
-			if (lenmsg && cretmsg[lenmsg - 1] != '\n') {
-				retmsg = alloc_printf("%s\n", cretmsg);
-				lenmsg++;
-			} else {
-				retmsg = strdup(cretmsg);
-			}
-			if (!retmsg)
-				return ERROR_GDB_BUFFER_TOO_SMALL;
-
-			if (retval == JIM_OK) {
-				if (lenmsg) {
-					char *hex_buffer = malloc(lenmsg * 2 + 1);
-					if (!hex_buffer) {
-						free(retmsg);
-						return ERROR_GDB_BUFFER_TOO_SMALL;
-					}
-
-					size_t pkt_len = hexify(hex_buffer, (const uint8_t *)retmsg, lenmsg,
-											lenmsg * 2 + 1);
-					gdb_put_packet(connection, hex_buffer, pkt_len);
-					free(hex_buffer);
-				} else {
-					gdb_put_packet(connection, "OK", 2);
-				}
-			} else {
-				if (lenmsg)
-					gdb_output_con(connection, retmsg);
-				gdb_send_error(connection, retval);
-			}
-			free(retmsg);
-			return ERROR_OK;
 		}
 		gdb_put_packet(connection, "OK", 2);
 		return ERROR_OK;
@@ -2987,7 +2889,7 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 	if (parse[0] == 'c') {
 		gdb_running_type = 'c';
 		LOG_DEBUG("target %s continue", target_name(target));
-		gdb_connection->output_flag = GDB_OUTPUT_ALL;
+		log_add_callback(gdb_log_callback, connection);
 		retval = target_resume(target, 1, 0, 0, 0);
 		if (retval == ERROR_TARGET_NOT_HALTED)
 			LOG_INFO("target %s was not halted when resume was requested", target_name(target));
@@ -3032,7 +2934,23 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 
 			if (target->rtos) {
 				/* FIXME: why is this necessary? rtos state should be up-to-date here already! */
-				rtos_update_threads(target);
+
+				/* Sometimes this results in picking a different thread than
+				 * gdb just requested to step. Then we fake it, and now there's
+				 * a different thread selected than gdb expects, so register
+				 * accesses go to the wrong one!
+				 * E.g.:
+				 * Hg1$
+				 * P8=72101ce197869329$		# write r8 on thread 1
+				 * g$
+				 * vCont?$
+				 * vCont;s:1;c$				# rtos_update_threads changes to other thread
+				 * g$
+				 * qXfer:threads:read::0,fff$
+				 * P8=cc060607eb89ca7f$		# write r8 on other thread
+				 * g$
+				 * */
+				/* rtos_update_threads(target); */
 
 				target->rtos->gdb_target_for_threadid(connection, thread_id, &ct);
 
@@ -3040,8 +2958,7 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 				 * check if the thread to be stepped is the current rtos thread
 				 * if not, we must fake the step
 				 */
-				if (target->rtos->current_thread != thread_id)
-					fake_step = true;
+				fake_step = rtos_needs_fake_step(target, thread_id);
 			}
 
 			if (parse[0] == ';') {
@@ -3076,28 +2993,24 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 			}
 
 			LOG_DEBUG("target %s single-step thread %"PRIx64, target_name(ct), thread_id);
-			gdb_connection->output_flag = GDB_OUTPUT_ALL;
+			log_add_callback(gdb_log_callback, connection);
 			target_call_event_callbacks(ct, TARGET_EVENT_GDB_START);
 
-			/*
-			 * work around an annoying gdb behaviour: when the current thread
-			 * is changed in gdb, it assumes that the target can follow and also
-			 * make the thread current. This is an assumption that cannot hold
-			 * for a real target running a multi-threading OS. We just fake
-			 * the step to not trigger an internal error in gdb. See
-			 * https://sourceware.org/bugzilla/show_bug.cgi?id=22925 for details
-			 */
 			if (fake_step) {
+				/* We just fake the step to not trigger an internal error in
+				 * gdb. See https://sourceware.org/bugzilla/show_bug.cgi?id=22925
+				 * for details. */
 				int sig_reply_len;
 				char sig_reply[128];
 
 				LOG_DEBUG("fake step thread %"PRIx64, thread_id);
+				target->rtos->current_threadid = thread_id;
 
 				sig_reply_len = snprintf(sig_reply, sizeof(sig_reply),
 										 "T05thread:%016"PRIx64";", thread_id);
 
 				gdb_put_packet(connection, sig_reply, sig_reply_len);
-				gdb_connection->output_flag = GDB_OUTPUT_NO;
+				log_remove_callback(gdb_log_callback, connection);
 
 				return true;
 			}
@@ -3109,7 +3022,7 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 					LOG_DEBUG("stepi ignored. GDB will now fetch the register state "
 									"from the target.");
 					gdb_sig_halted(connection);
-					gdb_connection->output_flag = GDB_OUTPUT_NO;
+					log_remove_callback(gdb_log_callback, connection);
 				} else
 					gdb_connection->frontend_state = TARGET_RUNNING;
 				return true;
@@ -3127,7 +3040,7 @@ static bool gdb_handle_vcont_packet(struct connection *connection, const char *p
 				/* send back signal information */
 				gdb_signal_reply(ct, connection);
 				/* stop forwarding log packets! */
-				gdb_connection->output_flag = GDB_OUTPUT_NO;
+				log_remove_callback(gdb_log_callback, connection);
 			} else
 				gdb_connection->frontend_state = TARGET_RUNNING;
 		} else {
@@ -3239,6 +3152,11 @@ static int gdb_v_packet(struct connection *connection,
 	int result;
 
 	struct target *target = get_target_from_connection(connection);
+	if (target->rtos != NULL && target->rtos->gdb_v_packet != NULL) {
+		int out = target->rtos->gdb_v_packet(connection, packet, packet_size);
+		if (out != GDB_THREAD_PACKET_NOT_CONSUMED)
+			return out;
+	}
 
 	if (strncmp(packet, "vCont", 5) == 0) {
 		bool handled;
@@ -3273,7 +3191,13 @@ static int gdb_v_packet(struct connection *connection,
 	if (strncmp(packet, "vFlashErase:", 12) == 0) {
 		unsigned long addr;
 		unsigned long length;
-
+		if(wchwlink){
+			if(riscvchip==1||riscvchip==6)
+			{	
+				gdb_put_packet(connection, "OK", 2);
+				return ERROR_OK;
+			}
+		}
 		char const *parse = packet + 12;
 		if (*parse == '\0') {
 			LOG_ERROR("incomplete vFlashErase packet received, dropping connection");
@@ -3457,10 +3381,6 @@ static void gdb_log_callback(void *priv, const char *file, unsigned line,
 	struct connection *connection = priv;
 	struct gdb_connection *gdb_con = connection->priv;
 
-	if (gdb_con->output_flag == GDB_OUTPUT_NO)
-		/* No out allowed */
-		return;
-
 	if (gdb_con->busy) {
 		/* do not reply this using the O packet */
 		return;
@@ -3487,7 +3407,6 @@ static int gdb_input_inner(struct connection *connection)
 	int retval;
 	struct gdb_connection *gdb_con = connection->priv;
 	static bool warn_use_ext;
-
 	target = get_target_from_connection(connection);
 
 	/* drain input buffer. If one of the packets fail, then an error
@@ -3510,10 +3429,8 @@ static int gdb_input_inner(struct connection *connection)
 		/* terminate with zero */
 		gdb_packet_buffer[packet_size] = '\0';
 
+		gdb_log_incoming_packet(gdb_packet_buffer);
 		if (packet_size > 0) {
-
-			gdb_log_incoming_packet(connection, gdb_packet_buffer);
-
 			retval = ERROR_OK;
 			switch (packet[0]) {
 				case 'T':	/* Is thread alive? */
@@ -3564,7 +3481,7 @@ static int gdb_input_inner(struct connection *connection)
 				case 's':
 				{
 					gdb_thread_packet(connection, packet, packet_size);
-					gdb_con->output_flag = GDB_OUTPUT_ALL;
+					log_add_callback(gdb_log_callback, connection);
 
 					if (gdb_con->mem_write_error) {
 						LOG_ERROR("Memory write failure!");
@@ -3607,7 +3524,7 @@ static int gdb_input_inner(struct connection *connection)
 						gdb_sig_halted(connection);
 
 						/* stop forwarding log packets! */
-						gdb_con->output_flag = GDB_OUTPUT_NO;
+						log_remove_callback(gdb_log_callback, connection);
 					} else {
 						/* We're running/stepping, in which case we can
 						 * forward log output until the target is halted
@@ -3646,6 +3563,11 @@ static int gdb_input_inner(struct connection *connection)
 						break;
 					}
 					gdb_put_packet(connection, "OK", 2);
+					if(riscvchip){
+						wlink_quitreset();
+					}else if(armchip){
+						wlink_armquitreset();
+					}
 					return ERROR_SERVER_REMOTE_CLOSED;
 				case '!':
 					/* handle extended remote protocol */
@@ -3658,14 +3580,12 @@ static int gdb_input_inner(struct connection *connection)
 					break;
 
 				case 'j':
-					/* DEPRECATED */
 					/* packet supported only by smp target i.e cortex_a.c*/
 					/* handle smp packet replying coreid played to gbd */
 					gdb_read_smp_packet(connection, packet, packet_size);
 					break;
 
 				case 'J':
-					/* DEPRECATED */
 					/* packet supported only by smp target i.e cortex_a.c */
 					/* handle smp packet setting coreid to be played at next
 					 * resume to gdb */
@@ -3681,7 +3601,7 @@ static int gdb_input_inner(struct connection *connection)
 					 * Fretcode,errno,Ctrl-C flag;call-specific attachment
 					 */
 					gdb_con->frontend_state = TARGET_RUNNING;
-					gdb_con->output_flag = GDB_OUTPUT_ALL;
+					log_add_callback(gdb_log_callback, connection);
 					gdb_fileio_response_packet(connection, packet, packet_size);
 					break;
 
@@ -3734,37 +3654,6 @@ static int gdb_input(struct connection *connection)
 	return ERROR_OK;
 }
 
-static void gdb_keep_client_alive(struct connection *connection)
-{
-	struct gdb_connection *gdb_con = connection->priv;
-
-	if (gdb_con->busy) {
-		/* do not send packets, retry asap */
-		return;
-	}
-
-	switch (gdb_con->output_flag) {
-	case GDB_OUTPUT_NO:
-		/* no need for keep-alive */
-		break;
-	case GDB_OUTPUT_ALL:
-		/* send an empty O packet */
-		gdb_output_con(connection, "");
-		break;
-	default:
-		break;
-	}
-}
-
-static const struct service_driver gdb_service_driver = {
-	.name = "gdb",
-	.new_connection_during_keep_alive_handler = NULL,
-	.new_connection_handler = gdb_new_connection,
-	.input_handler = gdb_input,
-	.connection_closed_handler = gdb_connection_closed,
-	.keep_client_alive_handler = gdb_keep_client_alive,
-};
-
 static int gdb_target_start(struct target *target, const char *port)
 {
 	struct gdb_service *gdb_service;
@@ -3781,14 +3670,19 @@ static int gdb_target_start(struct target *target, const char *port)
 	gdb_service->core[1] = -1;
 	target->gdb_service = gdb_service;
 
-	ret = add_service(&gdb_service_driver, port, target->gdb_max_connections, gdb_service);
+	ret = add_service("gdb",
+			port, target->gdb_max_connections, &gdb_new_connection, &gdb_input,
+			&gdb_connection_closed, gdb_service);
 	/* initialize all targets gdb service with the same pointer */
 	{
 		struct target_list *head;
-		foreach_smp_target(head, target->smp_targets) {
-			struct target *curr = head->target;
+		struct target *curr;
+		head = target->head;
+		while (head) {
+			curr = head->target;
 			if (curr != target)
 				curr->gdb_service = gdb_service;
+			head = head->next;
 		}
 	}
 	return ret;
@@ -4087,6 +3981,12 @@ int gdb_register_commands(struct command_context *cmd_ctx)
 	gdb_port = strdup("3333");
 	gdb_port_next = strdup("3333");
 	return register_commands(cmd_ctx, NULL, gdb_command_handlers);
+}
+
+void gdb_set_frontend_state_running(struct connection *connection)
+{
+	struct gdb_connection *gdb_con = connection->priv;
+	gdb_con->frontend_state = TARGET_RUNNING;
 }
 
 void gdb_service_free(void)

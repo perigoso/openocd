@@ -27,7 +27,6 @@ static int trst_gpio = -1;
 static int srst_gpio = -1;
 static int swclk_gpio = -1;
 static int swdio_gpio = -1;
-static int swdio_dir_gpio = -1;
 static int led_gpio = -1;
 static int gpiochip = -1;
 static int tck_gpiochip = -1;
@@ -38,7 +37,6 @@ static int trst_gpiochip = -1;
 static int srst_gpiochip = -1;
 static int swclk_gpiochip = -1;
 static int swdio_gpiochip = -1;
-static int swdio_dir_gpiochip = -1;
 static int led_gpiochip = -1;
 
 static struct gpiod_chip *gpiod_chip_tck;
@@ -49,7 +47,6 @@ static struct gpiod_chip *gpiod_chip_trst;
 static struct gpiod_chip *gpiod_chip_srst;
 static struct gpiod_chip *gpiod_chip_swclk;
 static struct gpiod_chip *gpiod_chip_swdio;
-static struct gpiod_chip *gpiod_chip_swdio_dir;
 static struct gpiod_chip *gpiod_chip_led;
 
 static struct gpiod_line *gpiod_tck;
@@ -59,7 +56,6 @@ static struct gpiod_line *gpiod_tdo;
 static struct gpiod_line *gpiod_trst;
 static struct gpiod_line *gpiod_swclk;
 static struct gpiod_line *gpiod_swdio;
-static struct gpiod_line *gpiod_swdio_dir;
 static struct gpiod_line *gpiod_srst;
 static struct gpiod_line *gpiod_led;
 
@@ -67,7 +63,6 @@ static int last_swclk;
 static int last_swdio;
 static bool last_stored;
 static bool swdio_input;
-static bool swdio_dir_is_active_high = true;
 
 /* Bitbang interface read of TDO */
 static bb_value_t linuxgpiod_read(void)
@@ -157,11 +152,6 @@ static void linuxgpiod_swdio_drive(bool is_output)
 	gpiod_line_release(gpiod_swdio);
 
 	if (is_output) {
-		if (gpiod_swdio_dir) {
-			retval = gpiod_line_set_value(gpiod_swdio_dir, swdio_dir_is_active_high ? 1 : 0);
-			if (retval < 0)
-				LOG_WARNING("Fail set swdio_dir");
-		}
 		retval = gpiod_line_request_output(gpiod_swdio, "OpenOCD", 1);
 		if (retval < 0)
 			LOG_WARNING("Fail request_output line swdio");
@@ -169,11 +159,6 @@ static void linuxgpiod_swdio_drive(bool is_output)
 		retval = gpiod_line_request_input(gpiod_swdio, "OpenOCD");
 		if (retval < 0)
 			LOG_WARNING("Fail request_input line swdio");
-		if (gpiod_swdio_dir) {
-			retval = gpiod_line_set_value(gpiod_swdio_dir, swdio_dir_is_active_high ? 0 : 1);
-			if (retval < 0)
-				LOG_WARNING("Fail set swdio_dir");
-		}
 	}
 
 	last_stored = false;
@@ -288,26 +273,42 @@ static bool linuxgpiod_swd_mode_possible(void)
 	return true;
 }
 
-static inline void helper_release(struct gpiod_line *line, struct gpiod_chip *chip)
+static inline void helper_release(struct gpiod_line *line)
 {
 	if (line)
 		gpiod_line_release(line);
-	if (chip)
-		gpiod_chip_close(chip);
 }
 
 static int linuxgpiod_quit(void)
 {
-	helper_release(gpiod_led,       gpiod_chip_led);
-	helper_release(gpiod_srst,      gpiod_chip_srst);
-	helper_release(gpiod_swdio,     gpiod_chip_swdio);
-	helper_release(gpiod_swdio_dir, gpiod_chip_swdio_dir);
-	helper_release(gpiod_swclk,     gpiod_chip_swclk);
-	helper_release(gpiod_trst,      gpiod_chip_trst);
-	helper_release(gpiod_tms,       gpiod_chip_tms);
-	helper_release(gpiod_tck,       gpiod_chip_tck);
-	helper_release(gpiod_tdi,       gpiod_chip_tdi);
-	helper_release(gpiod_tdo,       gpiod_chip_tdo);
+	helper_release(gpiod_led);
+	helper_release(gpiod_srst);
+	helper_release(gpiod_swdio);
+	helper_release(gpiod_swclk);
+	helper_release(gpiod_trst);
+	helper_release(gpiod_tms);
+	helper_release(gpiod_tck);
+	helper_release(gpiod_tdi);
+	helper_release(gpiod_tdo);
+
+	if (gpiod_chip_led != NULL)
+		gpiod_chip_close(gpiod_chip_led);
+	if (gpiod_chip_srst != NULL)
+		gpiod_chip_close(gpiod_chip_srst);
+	if (gpiod_chip_swdio != NULL)
+		gpiod_chip_close(gpiod_chip_swdio);
+	if (gpiod_chip_swclk != NULL)
+		gpiod_chip_close(gpiod_chip_swclk);
+	if (gpiod_chip_trst != NULL)
+		gpiod_chip_close(gpiod_chip_trst);
+	if (gpiod_chip_tms != NULL)
+		gpiod_chip_close(gpiod_chip_tms);
+	if (gpiod_chip_tck != NULL)
+		gpiod_chip_close(gpiod_chip_tck);
+	if (gpiod_chip_tdi != NULL)
+		gpiod_chip_close(gpiod_chip_tdi);
+	if (gpiod_chip_tdo != NULL)
+		gpiod_chip_close(gpiod_chip_tdo);
 
 	return ERROR_OK;
 }
@@ -450,25 +451,9 @@ static int linuxgpiod_init(void)
 			goto out_error;
 		}
 
-		if (is_gpio_valid(swdio_dir_gpio)) {
-			gpiod_chip_swdio_dir = gpiod_chip_open_by_number(swdio_dir_gpiochip);
-			if (!gpiod_chip_swdio_dir) {
-				LOG_ERROR("Cannot open LinuxGPIOD swdio_dir_gpiochip %d", swdio_dir_gpiochip);
-				goto out_error;
-			}
-		}
-
 		gpiod_swclk = helper_get_output_line("swclk", gpiod_chip_swclk, swclk_gpio, 1);
 		if (!gpiod_swclk)
 			goto out_error;
-
-		/* Set buffer direction before making SWDIO an output */
-		if (is_gpio_valid(swdio_dir_gpio)) {
-			gpiod_swdio_dir = helper_get_output_line("swdio_dir", gpiod_chip_swdio_dir, swdio_dir_gpio,
-					swdio_dir_is_active_high ? 1 : 0);
-			if (!gpiod_swdio_dir)
-				goto out_error;
-		}
 
 		gpiod_swdio = helper_get_output_line("swdio", gpiod_chip_swdio, swdio_gpio, 1);
 		if (!gpiod_swdio)
@@ -608,12 +593,6 @@ COMMAND_HANDLER(linuxgpiod_handle_swd_gpionum_swdio)
 			&swdio_gpio);
 }
 
-COMMAND_HANDLER(linuxgpiod_handle_swd_gpionum_swdio_dir)
-{
-	return CALL_COMMAND_HANDLER(linuxgpiod_helper_gpionum, "swdio_dir", &swdio_dir_gpiochip,
-			&swdio_dir_gpio);
-}
-
 COMMAND_HANDLER(linuxgpiod_handle_gpionum_led)
 {
 	return CALL_COMMAND_HANDLER(linuxgpiod_helper_gpionum, "led", &led_gpiochip,
@@ -632,7 +611,6 @@ COMMAND_HANDLER(linuxgpiod_handle_gpiochip)
 		srst_gpiochip = gpiochip;
 		swclk_gpiochip = gpiochip;
 		swdio_gpiochip = gpiochip;
-		swdio_dir_gpiochip = gpiochip;
 		led_gpiochip = gpiochip;
 	}
 
@@ -710,13 +688,6 @@ static const struct command_registration linuxgpiod_subcommand_handlers[] = {
 		.mode = COMMAND_CONFIG,
 		.help = "gpio chip number (optional) and gpio number for swdio.",
 		.usage = "[chip] swdio",
-	},
-	{
-		.name = "swdio_dir_num",
-		.handler = linuxgpiod_handle_swd_gpionum_swdio_dir,
-		.mode = COMMAND_CONFIG,
-		.help = "gpio chip number (optional) and gpio number for swdio_dir.",
-		.usage = "[chip] swdio_dir",
 	},
 	{
 		.name = "led_num",

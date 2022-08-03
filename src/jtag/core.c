@@ -1,5 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
-
 /***************************************************************************
  *   Copyright (C) 2009 Zachary T Welch                                    *
  *   zw@superlucidity.net                                                  *
@@ -13,6 +11,19 @@
  *                                                                         *
  *   Copyright (C) 2005 by Dominic Rath                                    *
  *   Dominic.Rath@gmx.de                                                   *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
  ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -37,7 +48,7 @@
 
 /* ipdbg are utilities to debug IP-cores. It uses JTAG for transport. */
 #include "server/ipdbg.h"
-
+extern bool wchwlink;
 /** The number of JTAG queue flushes (for profiling and debugging purposes). */
 static int jtag_flush_queue_count;
 
@@ -1216,6 +1227,10 @@ static int jtag_examine_chain(void)
 	 */
 	LOG_DEBUG("DR scan interrogation for IDCODE/BYPASS");
 	retval = jtag_examine_chain_execute(idcode_buffer, max_taps);
+	
+	if(wchwlink){
+		buf_set_u32(idcode_buffer, 0, 32, 0x00001);  //Default value,for reuse risc-v jtag debug
+	}
 	if (retval != ERROR_OK)
 		goto out;
 	if (!jtag_examine_chain_check(idcode_buffer, max_taps)) {
@@ -1262,7 +1277,7 @@ static int jtag_examine_chain(void)
 			jtag_tap_init(tap);
 		}
 
-		if ((idcode & 1) == 0 && !tap->ignore_bypass) {
+		if ((idcode & 1) == 0) {
 			/* Zero for LSB indicates a device in bypass */
 			LOG_INFO("TAP %s does not have valid IDCODE (idcode=0x%" PRIx32 ")",
 					tap->dotted_name, idcode);
@@ -1393,7 +1408,7 @@ static int jtag_validate_ircapture(void)
 		 */
 		uint64_t val = buf_get_u64(ir_test, chain_pos, tap->ir_length);
 		if ((val & tap->ir_capture_mask) != tap->ir_capture_value) {
-			LOG_ERROR("%s: IR capture error; saw 0x%0*" PRIx64 " not 0x%0*" PRIx32,
+			LOG_DEBUG("%s: IR capture error; saw 0x%0*" PRIx64 " not 0x%0*" PRIx32,
 				jtag_tap_name(tap),
 				(tap->ir_length + 7) / tap->ir_length, val,
 				(tap->ir_length + 7) / tap->ir_length, tap->ir_capture_value);

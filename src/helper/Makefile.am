@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
-
 noinst_LTLIBRARIES += %D%/libhelper.la
 
 %C%_libhelper_la_SOURCES = \
@@ -30,7 +28,9 @@ noinst_LTLIBRARIES += %D%/libhelper.la
 	%D%/system.h \
 	%D%/jep106.h \
 	%D%/jep106.inc \
-	%D%/jim-nvp.h
+	%D%/jim-nvp.h \
+	%D%/base64.c \
+	%D%/base64.h
 
 STARTUP_TCL_SRCS += %D%/startup.tcl
 EXTRA_DIST += \

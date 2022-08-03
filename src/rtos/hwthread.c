@@ -1,4 +1,18 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
+ ***************************************************************************/
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -9,7 +23,6 @@
 #include "target/target.h"
 #include "target/target_type.h"
 #include "target/register.h"
-#include <target/smp.h>
 #include "rtos.h"
 #include "helper/log.h"
 #include "helper/types.h"
@@ -18,13 +31,14 @@
 static bool hwthread_detect_rtos(struct target *target);
 static int hwthread_create(struct target *target);
 static int hwthread_update_threads(struct rtos *rtos);
-static int hwthread_get_thread_reg(struct rtos *rtos, int64_t thread_id,
-		uint32_t reg_num, struct rtos_reg *rtos_reg);
+static int hwthread_get_thread_reg_value(struct rtos *rtos, int64_t thread_id,
+		uint32_t reg_num, uint32_t *size, uint8_t **value);
 static int hwthread_get_thread_reg_list(struct rtos *rtos, int64_t thread_id,
 		struct rtos_reg **reg_list, int *num_regs);
 static int hwthread_get_symbol_list_to_lookup(struct symbol_table_elem *symbol_list[]);
 static int hwthread_smp_init(struct target *target);
 static int hwthread_set_reg(struct rtos *rtos, uint32_t reg_num, uint8_t *reg_value);
+static bool hwthread_needs_fake_step(struct target *target, int64_t thread_id);
 static int hwthread_read_buffer(struct rtos *rtos, target_addr_t address,
 		uint32_t size, uint8_t *buffer);
 static int hwthread_write_buffer(struct rtos *rtos, target_addr_t address,
@@ -45,10 +59,11 @@ const struct rtos_type hwthread_rtos = {
 	.create = hwthread_create,
 	.update_threads = hwthread_update_threads,
 	.get_thread_reg_list = hwthread_get_thread_reg_list,
-	.get_thread_reg = hwthread_get_thread_reg,
+	.get_thread_reg_value = hwthread_get_thread_reg_value,
 	.get_symbol_list_to_lookup = hwthread_get_symbol_list_to_lookup,
 	.smp_init = hwthread_smp_init,
 	.set_reg = hwthread_set_reg,
+	.needs_fake_step = hwthread_needs_fake_step,
 	.read_buffer = hwthread_read_buffer,
 	.write_buffer = hwthread_write_buffer,
 };
@@ -85,16 +100,13 @@ static int hwthread_update_threads(struct rtos *rtos)
 	enum target_debug_reason current_reason = DBG_REASON_UNDEFINED;
 
 	if (!rtos)
-		return -1;
+		return ERROR_FAIL;
 
 	target = rtos->target;
 
-	/* wipe out previous thread details if any */
-	rtos_free_threadlist(rtos);
-
 	/* determine the number of "threads" */
 	if (target->smp) {
-		foreach_smp_target(head, target->smp_targets) {
+		for (head = target->head; head; head = head->next) {
 			struct target *curr = head->target;
 
 			if (!target_was_examined(curr))
@@ -105,12 +117,17 @@ static int hwthread_update_threads(struct rtos *rtos)
 	} else
 		thread_list_size = 1;
 
+	/* Wipe out previous thread details if any, but preserve threadid. */
+	int64_t current_threadid = rtos->current_threadid;
+	rtos_free_threadlist(rtos);
+	rtos->current_threadid = current_threadid;
+
 	/* create space for new thread details */
 	rtos->thread_details = malloc(sizeof(struct thread_detail) * thread_list_size);
 
 	if (target->smp) {
 		/* loop over all threads */
-		foreach_smp_target(head, target->smp_targets) {
+		for (head = target->head; head; head = head->next) {
 			struct target *curr = head->target;
 
 			if (!target_was_examined(curr))
@@ -205,8 +222,7 @@ static struct target *hwthread_find_thread(struct target *target, int64_t thread
 	if (!target)
 		return NULL;
 	if (target->smp) {
-		struct target_list *head;
-		foreach_smp_target(head, target->smp_targets) {
+		for (struct target_list *head = target->head; head; head = head->next) {
 			if (thread_id == threadid_from_target(head->target))
 				return head->target;
 		}
@@ -266,8 +282,8 @@ static int hwthread_get_thread_reg_list(struct rtos *rtos, int64_t thread_id,
 	return ERROR_OK;
 }
 
-static int hwthread_get_thread_reg(struct rtos *rtos, int64_t thread_id,
-		uint32_t reg_num, struct rtos_reg *rtos_reg)
+static int hwthread_get_thread_reg_value(struct rtos *rtos, int64_t thread_id,
+		uint32_t reg_num, uint32_t *size, uint8_t **value)
 {
 	if (!rtos)
 		return ERROR_FAIL;
@@ -295,11 +311,14 @@ static int hwthread_get_thread_reg(struct rtos *rtos, int64_t thread_id,
 	if (reg->type->get(reg) != ERROR_OK)
 		return ERROR_FAIL;
 
-	rtos_reg->number = reg->number;
-	rtos_reg->size = reg->size;
-	unsigned bytes = (reg->size + 7) / 8;
-	assert(bytes <= sizeof(rtos_reg->value));
-	memcpy(rtos_reg->value, reg->value, bytes);
+	*size = reg->size;
+	unsigned bytes = DIV_ROUND_UP(reg->size, 8);
+	*value = malloc(bytes);
+	if (!*value) {
+		LOG_ERROR("Failed to allocate memory for %d-bit register.", reg->size);
+		return ERROR_FAIL;
+	}
+	memcpy(*value, reg->value, bytes);
 
 	return ERROR_OK;
 }
@@ -389,6 +408,11 @@ static int hwthread_create(struct target *target)
 	target->rtos->gdb_target_for_threadid = hwthread_target_for_threadid;
 	target->rtos->gdb_thread_packet = hwthread_thread_packet;
 	return 0;
+}
+
+static bool hwthread_needs_fake_step(struct target *target, int64_t thread_id)
+{
+	return false;
 }
 
 static int hwthread_read_buffer(struct rtos *rtos, target_addr_t address,
