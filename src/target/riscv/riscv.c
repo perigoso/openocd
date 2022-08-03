@@ -23,6 +23,8 @@
 #include "debug_defines.h"
 #include <helper/bits.h>
 
+extern bool wchwlink;
+
 #define get_field(reg, mask) (((reg) & (mask)) / ((mask) & ~((mask) << 1)))
 #define set_field(reg, mask, val) (((reg) & ~(mask)) | (((val) * ((mask) & ~((mask) << 1))) & (mask)))
 
@@ -398,6 +400,9 @@ static uint32_t dtmcontrol_scan(struct target *target, uint32_t out)
 	}
 
 	uint32_t in = buf_get_u32(field.in_value, 0, 32);
+	if(wchwlink){
+		buf_set_u32(&in, 0, 32, 0x00000071);
+	}
 	LOG_DEBUG("DTMCONTROL: 0x%x -> 0x%x", out, in);
 
 	return in;
@@ -581,7 +586,7 @@ static int maybe_add_trigger_t1(struct target *target,
 
 	return ERROR_OK;
 }
-
+extern unsigned char riscvchip; 
 static int maybe_add_trigger_t2(struct target *target,
 		struct trigger *trigger, uint64_t tdata1)
 {
@@ -594,7 +599,8 @@ static int maybe_add_trigger_t2(struct target *target,
 	}
 
 	/* address/data match trigger */
-	tdata1 |= MCONTROL_DMODE(riscv_xlen(target));
+	if(riscvchip==0)
+		tdata1 |= MCONTROL_DMODE(riscv_xlen(target));
 	tdata1 = set_field(tdata1, MCONTROL_ACTION,
 			MCONTROL_ACTION_DEBUG_MODE);
 	tdata1 = set_field(tdata1, MCONTROL_MATCH, MCONTROL_MATCH_EQUAL);
